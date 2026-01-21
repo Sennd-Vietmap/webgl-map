@@ -333,6 +333,63 @@ public class Camera
         
         return (finalX, finalY);
     }
+
+    /// <summary>
+    /// Convert world coordinates back to screen coordinates (Verification)
+    /// </summary>
+    public (double x, double y) WorldToScreen(double worldX, double worldY)
+    {
+        // 1. Convert to Global Mercator relative to Camera
+        double worldSize = TileSize * Math.Pow(2, Zoom);
+        
+        // Pivot-Space World Coordinates
+        // P_pix.x = (P.x - C.x) * S
+        // P_pix.y = (P.y - C.y) * -S
+        double wx = (worldX - X) * worldSize;
+        double wy = (worldY - Y) * -worldSize; // Flip Y
+        
+        // 2. Apply View Matrix
+        // view = Translate(0,0,-Alt) * RotX(Pitch) * RotZ(Bearing)
+        // Order: P_view = View * P_world
+        // But OpenTK is Row-Major: P_view = P_world * View
+        
+        // Let's rely on the actual Matrix for this direction to be safe
+        // Or build it manually to verify match?
+        // Let's use the matrix to see where the GPU puts it.
+        
+        // Problem: We need the exact matrix components or use Vector4 transform
+        
+        // Full Transform used in GetViewProjectionMatrix:
+        // worldTransform (Translate/Scale) -> View -> Proj
+        
+        /* 
+           Matrix4 worldTransform = Matrix4.CreateTranslation(-(float)X, -(float)Y, 0);
+           worldTransform *= Matrix4.CreateScale((float)worldSize, -(float)worldSize, 1.0f);
+           return worldTransform * view * projection;
+        */
+        
+        // We can just construct the vector (worldX, worldY, 0, 1) and multiply by VP
+        // BUT: Floating point precision issues with raw matrix mult!
+        // worldX is 0..1 (Small).
+        
+        Matrix4 vp = GetViewProjectionMatrix();
+        Vector4 worldPos = new Vector4((float)worldX, (float)worldY, 0, 1);
+        Vector4 clipPos = Vector4.TransformRow(worldPos, vp);
+        
+        if (Math.Abs(clipPos.W) < 1e-5) return (-1, -1);
+        
+        // NDC
+        Vector3 ndc = clipPos.Xyz / clipPos.W;
+        
+        // Screen
+        // ndc.x = (x / w) * 2 - 1  => x = (ndc.x + 1) * 0.5 * w
+        // ndc.y = 1 - (y / h) * 2  => y = (1 - ndc.y) * 0.5 * h
+        
+        double screenX = (ndc.X + 1.0) * 0.5 * ViewportWidth;
+        double screenY = (1.0 - ndc.Y) * 0.5 * ViewportHeight;
+        
+        return (screenX, screenY);
+    }
     
     /// <summary>
     /// Get the bounding box of the current view in lat/lng

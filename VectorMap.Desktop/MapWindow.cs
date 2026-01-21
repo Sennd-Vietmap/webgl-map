@@ -127,17 +127,29 @@ public class MapWindow : GameWindow
                 ImGui.Text($"Pitch: {_camera.Pitch:F0} deg");
                 ImGui.Text($"Bearing: {_camera.Bearing:F0} deg");
                 
-                // Mouse Coordinates
+                // Mouse Coordinates & Round Trip Logic
                 var mouse = MousePosition;
                 var (wx, wy) = _camera.ScreenToWorld(mouse.X, mouse.Y, Size.X, Size.Y);
                 var mLat = MercatorCoordinate.LatFromMercatorY(wy);
                 var mLng = MercatorCoordinate.LngFromMercatorX(wx);
                 ImGui.Text($"Mouse: {mLng:F5}, {mLat:F5}");
                 
+                // Debug: Round Trip
+                var (sx, sy) = _camera.WorldToScreen(wx, wy);
+                float dist = new Vector2((float)sx, (float)sy).Length - new Vector2(mouse.X, mouse.Y).Length;
+                dist = (new Vector2((float)sx - mouse.X, (float)sy - mouse.Y)).Length;
+                
+                ImGui.Text($"Reproject Drift: {dist:F2}px");
+                if (dist > 1.0f) ImGui.TextColored(new System.Numerics.Vector4(1,0,0,1), "WARNING: High Drift!");
+                
                 ImGui.Separator();
                 ImGui.PlotLines("##fps", ref _fpsArray[0], i, 0, $"Avg: {_fpsArray.Take(i).Average():F0}", 0, 120, new System.Numerics.Vector2(200, 50));
                 
                 ImGui.End();
+                
+                // Draw debug circle at re-projected point
+                var drawList = ImGui.GetBackgroundDrawList();
+                drawList.AddCircle(new System.Numerics.Vector2((float)sx, (float)sy), 5.0f, 0xFF0000FF, 12, 2.0f);
             }
         }
         
