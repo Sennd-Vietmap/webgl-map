@@ -89,6 +89,21 @@ public class MapRenderer : IDisposable
         _isInitialized = true;
     }
     
+    // Standard drawing order for map layers (bottom to top)
+    private static readonly string[] GlobalLayerOrder = new[]
+    {
+        "background",
+        "landcover",
+        "park",
+        "landuse",
+        "water",
+        "boundary",
+        "transportation",
+        "building",
+        "housenumber",
+        "label"
+    };
+
     /// <summary>
     /// Render all tiles with the given camera
     /// </summary>
@@ -98,6 +113,10 @@ public class MapRenderer : IDisposable
         {
             Initialize();
         }
+        
+        GL.Enable(EnableCap.Multisample);
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         
         GL.UseProgram(_shaderProgram);
         GL.BindVertexArray(_vao);
@@ -110,50 +129,67 @@ public class MapRenderer : IDisposable
         GL.Uniform1(_scaleLocation, 1.0f);
         GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
         
-        // Render each tile
+        // 1. Group all feature sets by layer across all tiles for batching
+        var layerGroups = new Dictionary<string, List<FeatureSet>>();
         foreach (var tile in tiles)
         {
             foreach (var featureSet in tile.FeatureSets)
             {
-                // Skip disabled layers
-                if (disabledLayers?.Contains(featureSet.LayerName) == true)
-                    continue;
-                    
-                // Skip if no color defined for this layer
-                if (!_layerColors.TryGetValue(featureSet.LayerName, out var color))
-                    continue;
-                    
-                // Skip empty vertex arrays
-                if (featureSet.Vertices.Length == 0)
-                    continue;
-                
-                // Set color uniform (Color4 is already 0-1 range)
-                GL.Uniform4(_colorLocation, color.R, color.G, color.B, color.A);
-                
-                // Upload vertices
-                GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-                GL.BufferData(BufferTarget.ArrayBuffer, featureSet.Vertices.Length * sizeof(float), 
-                    featureSet.Vertices, BufferUsageHint.DynamicDraw);
-                
-                // Re-setup vertex attribute pointer after uploading new data
-                GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
-                GL.EnableVertexAttribArray(0);
-                
-                // Draw based on geometry type
-                PrimitiveType primitiveType = featureSet.Type switch
+                if (!layerGroups.TryGetValue(featureSet.LayerName, out var list))
                 {
-                    GeometryType.Point => PrimitiveType.Points,
-                    GeometryType.Line => PrimitiveType.Lines,
-                    _ => PrimitiveType.Triangles
-                };
-                
-                int vertexCount = featureSet.Vertices.Length / 2;
-                GL.DrawArrays(primitiveType, 0, vertexCount);
+                    list = new List<FeatureSet>();
+                    layerGroups[featureSet.LayerName] = list;
+                }
+                list.Add(featureSet);
             }
+        }
+
+        // 2. Render layers in the predefined order
+        foreach (var layerName in GlobalLayerOrder)
+        {
+            if (layerGroups.TryGetValue(layerName, out var group))
+            {
+                RenderGroup(group, disabledLayers);
+                layerGroups.Remove(layerName);
+            }
+        }
+
+        // 3. Render any remaining layers (unrecognized)
+        foreach (var group in layerGroups.Values)
+        {
+            RenderGroup(group, disabledLayers);
         }
         
         GL.BindVertexArray(0);
         GL.UseProgram(0);
+    }
+
+    private void RenderGroup(List<FeatureSet> featureSets, HashSet<string>? disabledLayers)
+    {
+        foreach (var featureSet in featureSets)
+        {
+            if (disabledLayers?.Contains(featureSet.LayerName) == true) continue;
+            if (!_layerColors.TryGetValue(featureSet.LayerName, out var color)) continue;
+            if (featureSet.Vertices.Length == 0) continue;
+            
+            GL.Uniform4(_colorLocation, color.R, color.G, color.B, color.A);
+            
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, featureSet.Vertices.Length * sizeof(float), 
+                featureSet.Vertices, BufferUsageHint.DynamicDraw);
+            
+            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            
+            PrimitiveType primitiveType = featureSet.Type switch
+            {
+                GeometryType.Point => PrimitiveType.Points,
+                GeometryType.Line => PrimitiveType.Lines,
+                _ => PrimitiveType.Triangles
+            };
+            
+            GL.DrawArrays(primitiveType, 0, featureSet.Vertices.Length / 2);
+        }
     }
     
     /// <summary>

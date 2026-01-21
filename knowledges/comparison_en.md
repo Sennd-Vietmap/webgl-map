@@ -170,7 +170,31 @@ The Visual Studio Designer **will crash** if your control tries to execute OpenG
 
 ### Modular Architecture (Core Project)
 When moving from a standalone app to a Control, **Refactor Your Logic**:
-- Move `Camera`, `TileManager`, `MapRenderer`, and `MapOptions` into a `Core` class library.
+- move `Camera`, `TileManager`, `MapRenderer`, and `MapOptions` into a `Core` class library.
 - This allows both `VectorMap.Desktop` (OpenTK GameWindow) and `VectorMap.WinForms` (GLControl) to share the exact same rendering logic, ensuring a consistent user experience.
+
+---
+
+## 8. Polygon Triangulation & Rendering Order
+Rendering complex map data (polygons with holes, overlapping layers) requires precision beyond simply "drawing triangles."
+
+### The "Sliver" Artifact & Triangulation
+When vector tiles are clipped, they often contain duplicate points, zero-length edges, or MVT `ClosePath` artifacts.
+- **The Problem**: Passing "dirty" coordinates to a tessellator (like `LibTessDotNet`) causes degenerate triangles, resulting in "white strips" across the screen.
+- **The Fix**: 
+    1. **Clean the Data**: Remove consecutive duplicate points using an epsilon threshold.
+    2. **Clip Loop Closure**: Explicitly detect and remove the trailing duplicate point from MVT rings before triangulation.
+    3. **Robust Math**: Use `EvenOdd` winding and a **Combiner callback** to handle self-intersecting polygons gracefully.
+
+### Layer-First Bathing (The Overlap Fix)
+If you render tiles one-by-one, a building in Tile A might be drawn *before* the water in Tile B, leading to visual errors.
+- **Old Strategy**: `foreach(tile) { foreach(layer) { draw } }` (Tile-First)
+- **New Strategy**: `foreach(GlobalLayerOrder) { foreach(tile) { draw layer } }` (Layer-First)
+- **Result**: Ensures that "Water" is drawn across the entire viewport before "Buildings" start, eliminating Z-fighting and incorrect overlaps without needing complex depth buffer management.
+
+### Edge Smoothing (MSAA)
+To remove "staircase" aliasing on building edges:
+- Initialize `GLControl` with `GLControlSettings { NumberOfSamples = 4 }`.
+- Enable `EnableCap.Multisample` on the GPU side.
 
 

@@ -170,7 +170,31 @@ Trình thiết kế (Designer) của Visual Studio **sẽ bị cash** nếu Cont
 
 ### Kiến trúc Module (Dự án Core)
 Khi chuyển từ app độc lập sang Control, hãy **Tái cấu trúc (Refactor)** logic của bạn:
-- Di chuyển `Camera`, `TileManager`, `MapRenderer`, và `MapOptions` vào một thư viện `Core` (Class Library).
+- Di chuyển `Camera`, `TileManager`, `MapRenderer`, and `MapOptions` vào một thư viện `Core` (Class Library).
 - Điều này cho phép cả `VectorMap.Desktop` (OpenTK GameWindow) và `VectorMap.WinForms` (GLControl) dùng chung một logic render duy nhất, đảm bảo trải nghiệm người dùng đồng nhất.
+
+---
+
+## 8. Triangulation Polygon & Thứ tự Rendering
+Việc render dữ liệu bản đồ phức tạp (polygon có lỗ, các lớp chồng chéo) đòi hỏi sự chính xác cao hơn là chỉ việc "vẽ các hình tam giác".
+
+### Lỗi "Sliver" (Mảnh vụn) & Triangulation
+Khi các vector tile bị cắt (clipped), chúng thường chứa các điểm trùng lặp, các cạnh có độ dài bằng 0, hoặc các artifact từ lệnh `ClosePath` của MVT.
+- **Vấn đề**: Việc gửi các tọa độ "bẩn" này vào bộ chia tam giác (như `LibTessDotNet`) gây ra các tam giác thoái hóa, tạo ra các "dải trắng" (white strips) chạy ngang màn hình.
+- **Cách sửa**: 
+    1. **Làm sạch dữ liệu**: Loại bỏ các điểm trùng lặp liên tiếp bằng cách sử dụng một ngưỡng sai số (epsilon).
+    2. **Xử lý đóng vòng**: Phát hiện và loại bỏ điểm trùng lặp cuối cùng từ các vòng (ring) của MVT trước khi thực hiện triangulation.
+    3. **Toán học mạnh mẽ**: Sử dụng quy tắc `EvenOdd` và một **Combiner callback** để xử lý các polygon tự cắt (self-intersecting) một cách mượt mà.
+
+### Layer-First Batching (Sửa lỗi chồng lấn)
+Nếu bạn render từng tile một theo thứ tự, một tòa nhà ở Tile A có thể được vẽ *trước* lớp nước ở Tile B, dẫn đến lỗi hiển thị.
+- **Chiến lược cũ**: `foreach(tile) { foreach(layer) { vẽ } }` (Tile-First)
+- **Chiến lược mới**: `foreach(GlobalLayerOrder) { foreach(tile) { vẽ layer } }` (Layer-First)
+- **Kết quả**: Đảm bảo rằng lớp "Nước" được vẽ trên toàn bộ viewport trước khi các "Tòa nhà" bắt đầu được vẽ, giúp loại bỏ hiện tượng Z-fighting và chồng lấn sai mà không cần quản lý depth buffer phức tạp.
+
+### Làm mịn cạnh (MSAA)
+Để loại bỏ hiện tượng răng cưa (aliasing) trên các cạnh tòa nhà:
+- Khởi tạo `GLControl` với `GLControlSettings { NumberOfSamples = 4 }`.
+- Bật `EnableCap.Multisample` ở phía GPU.
 
 

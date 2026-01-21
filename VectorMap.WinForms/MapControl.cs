@@ -32,7 +32,7 @@ namespace VectorMap.WinForms
         private long _lastFpsUpdate;
         private bool _isInitialized = false;
 
-        public MapControl() : base()
+        public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
             this.Dock = DockStyle.Fill;
         }
