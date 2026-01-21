@@ -8,6 +8,7 @@ namespace VectorMap.Core.Tiles;
 public class TileManager
 {
     private readonly Dictionary<string, TileData> _tileCache = new();
+    private readonly object _cacheLock = new object();
     private readonly VectorTileParser _parser;
     private readonly HttpClient _httpClient;
     private readonly string _tileServerUrl;
@@ -42,6 +43,11 @@ public class TileManager
         var maxTile = TileCoordinate.FromLngLat(bounds.MaxLng, bounds.MinLat, z);
         
         // Calculate tiles visible in viewport
+        // Check usage of TilesInView to see if it needs locking (it is only used on main thread in UpdateViewport and GetRenderableTiles? 
+        // UpdateViewport is called from MapWindow.OnRenderFrame (Main Thread).
+        // GetRenderableTiles is called from MapWindow.OnRenderFrame (Main Thread).
+        // So TilesInView is safe.
+        
         TilesInView.Clear();
         int minX = Math.Max(minTile.X, 0);
         int maxX = maxTile.X;
@@ -85,9 +91,16 @@ public class TileManager
         }
         
         // Load tiles that aren't cached
+        // Load tiles that aren't cached
         foreach (var key in tilesToLoad)
         {
-            if (!_tileCache.ContainsKey(key))
+            bool isCached;
+            lock (_cacheLock)
+            {
+                isCached = _tileCache.ContainsKey(key);
+            }
+            
+            if (!isCached)
             {
                 var parts = key.Split('/');
                 var tile = new TileCoordinate(int.Parse(parts[0]), int.Parse(parts[1]), int.Parse(parts[2]));
@@ -128,7 +141,10 @@ public class TileManager
                 LoadedAt = DateTime.UtcNow
             };
             
-            _tileCache[key] = tileData;
+            lock (_cacheLock)
+            {
+                _tileCache[key] = tileData;
+            }
             TileLoaded?.Invoke(tile, tileData);
         }
         catch (Exception ex)
@@ -143,7 +159,13 @@ public class TileManager
     /// </summary>
     public TileData? GetTile(TileCoordinate tile)
     {
-        return _tileCache.TryGetValue(tile.ToKey(), out var data) ? data : null;
+        string key = tile.ToKey();
+        TileData? data;
+        lock (_cacheLock)
+        {
+            _tileCache.TryGetValue(key, out data);
+        }
+        return data;
     }
     
     /// <summary>
@@ -151,9 +173,9 @@ public class TileManager
     /// </summary>
     public TileData? GetPlaceholderTile(TileCoordinate tile)
     {
-        // Try parent first
+        // Try parent
         var parent = tile.GetParent();
-        if (_tileCache.TryGetValue(parent.ToKey(), out var parentData) && parentData.IsLoaded)
+        if (GetTile(parent) is { IsLoaded: true } parentData)
         {
             return parentData;
         }
@@ -161,7 +183,7 @@ public class TileManager
         // Try children
         foreach (var child in tile.GetChildren())
         {
-            if (_tileCache.TryGetValue(child.ToKey(), out var childData) && childData.IsLoaded)
+            if (GetTile(child) is { IsLoaded: true } childData)
             {
                 return childData;
             }
@@ -199,15 +221,15 @@ public class TileManager
     /// </summary>
     public void PruneCache(int maxAge = 300)
     {
-        var cutoff = DateTime.UtcNow.AddSeconds(-maxAge);
-        var keysToRemove = _tileCache
-            .Where(kvp => kvp.Value.LoadedAt < cutoff && !TilesInView.Any(t => t.ToKey() == kvp.Key))
-            .Select(kvp => kvp.Key)
-            .ToList();
-            
-        foreach (var key in keysToRemove)
+        var now = DateTime.UtcNow;
+        lock (_cacheLock)
         {
-            _tileCache.Remove(key);
+            var keysToRemove = _tileCache.Where(kvp => (now - kvp.Value.LoadedAt).TotalSeconds > maxAge).Select(kvp => kvp.Key).ToList();
+            
+            foreach (var key in keysToRemove)
+            {
+                _tileCache.Remove(key);
+            }
         }
     }
 }

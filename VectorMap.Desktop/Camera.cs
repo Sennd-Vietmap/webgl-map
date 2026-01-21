@@ -31,6 +31,7 @@ public class Camera
     
     /// <summary>
     /// Get the view-projection matrix for rendering
+    /// Matches the JavaScript gl-matrix implementation exactly
     /// </summary>
     public Matrix4 GetViewProjectionMatrix()
     {
@@ -38,18 +39,34 @@ public class Camera
         double widthScale = TileSize / ViewportWidth;
         double heightScale = TileSize / ViewportHeight;
         
+        // Camera matrix scale components (same as JS)
         float scaleX = (float)(zoomScale / widthScale);
         float scaleY = (float)(zoomScale / heightScale);
         
-        // The camera matrix in JS is built as: mat3.translate then mat3.scale
-        // In gl-matrix, this means: result = translate * scale (scale applied first)
-        // The view matrix is the inverse of the camera matrix
-        // 
-        // Camera matrix: first scale, then translate to camera position
-        // View matrix (inverse): first translate by -camera position, then scale by inverse
+        // The camera matrix in gl-matrix (mat3) after translate then scale is:
+        // [scaleX,    0,   0]
+        // [  0,    scaleY, 0]
+        // [X*scaleX, Y*scaleY, 1]  (with column vectors)
+        //
+        // The inverse (view matrix) is:
+        // [1/scaleX,      0,      0]
+        // [   0,      1/scaleY,   0]
+        // [  -X,        -Y,       1]
+        //
+        // But we're using row vectors in OpenTK, and mat4 not mat3
+        // For row vectors: v' = v * M, the matrix layout is transposed
         
-        var viewMat = Matrix4.CreateTranslation(-(float)X, -(float)Y, 0) *
-                      Matrix4.CreateScale(1f / scaleX, 1f / scaleY, 1f);
+        float invScaleX = 1f / scaleX;
+        float invScaleY = 1f / scaleY;
+        
+        // Build the view matrix directly for row-vector multiplication
+        // First scale, then translate
+        var viewMat = new Matrix4(
+            invScaleX, 0, 0, 0,
+            0, invScaleY, 0, 0,
+            0, 0, 1, 0,
+            -(float)X * invScaleX, -(float)Y * invScaleY, 0, 1
+        );
         
         return viewMat;
     }
@@ -142,10 +159,11 @@ public class Camera
         y2 = y2 / zoomScale / TileSize;
         
         // Get LngLat bounding box
+        // Get LngLat bounding box
         double minLng = MercatorCoordinate.LngFromMercatorX(x1);
-        double maxLat = MercatorCoordinate.LatFromMercatorY(y1);
+        double minLat = MercatorCoordinate.LatFromMercatorY(y1); // y1 is bottom (larger y) -> min lat
         double maxLng = MercatorCoordinate.LngFromMercatorX(x2);
-        double minLat = MercatorCoordinate.LatFromMercatorY(y2);
+        double maxLat = MercatorCoordinate.LatFromMercatorY(y2); // y2 is top (smaller y) -> max lat
         
         return new BoundingBox(minLng, minLat, maxLng, maxLat);
     }
