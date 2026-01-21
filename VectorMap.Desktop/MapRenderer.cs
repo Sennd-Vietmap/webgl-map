@@ -14,6 +14,8 @@ public class MapRenderer : IDisposable
     private int _vbo;
     private int _matrixLocation;
     private int _colorLocation;
+    private int _scaleLocation;
+    private int _offsetLocation;
     
     private readonly Dictionary<string, Color4> _layerColors;
     private bool _isInitialized;
@@ -25,7 +27,9 @@ public class MapRenderer : IDisposable
             { "water", new Color4(180/255f, 240/255f, 250/255f, 1f) },
             { "landcover", new Color4(202/255f, 246/255f, 193/255f, 1f) },
             { "park", new Color4(202/255f, 255/255f, 193/255f, 1f) },
-            { "building", new Color4(185/255f, 175/255f, 139/255f, 0.75f) }
+            { "building", new Color4(185/255f, 175/255f, 139/255f, 0.75f) },
+            { "transportation", new Color4(255/255f, 255/255f, 255/255f, 1f) },
+            { "housenumber", new Color4(50/255f, 50/255f, 50/255f, 1f) }
         };
     }
     
@@ -66,6 +70,8 @@ public class MapRenderer : IDisposable
         // Get uniform locations
         _matrixLocation = GL.GetUniformLocation(_shaderProgram, "uMatrix");
         _colorLocation = GL.GetUniformLocation(_shaderProgram, "uColor");
+        _scaleLocation = GL.GetUniformLocation(_shaderProgram, "uScale");
+        _offsetLocation = GL.GetUniformLocation(_shaderProgram, "uOffset");
         
         // Create VAO and VBO
         _vao = GL.GenVertexArray();
@@ -99,6 +105,10 @@ public class MapRenderer : IDisposable
         // Set matrix uniform - use camera's view projection matrix
         Matrix4 matrix = camera.GetViewProjectionMatrix();
         GL.UniformMatrix4(_matrixLocation, false, ref matrix);
+        
+        // Set default scale/offset (1.0, 0.0) as vertices are already global
+        GL.Uniform1(_scaleLocation, 1.0f);
+        GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
         
         // Render each tile
         foreach (var tile in tiles)

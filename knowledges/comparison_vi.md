@@ -1,4 +1,6 @@
 # Cầu nối Lập trình Đồ họa: Từ WebGL đến OpenTK
+**Phiên bản: 0.2.0**
+
 ## Kiến thức chuyên sâu cho Kỹ sư Đồ họa tương lai
 
 Tài liệu này đóng vai trò cầu nối cho các lập trình viên chuyển đổi giữa WebGL (JavaScript) và OpenTK (.NET), đồng thời cung cấp kiến thức nền tảng quan trọng cho lập trình đồ họa hiện đại. Tại đây, chúng ta sẽ đi sâu vào lý do *tại sao* (why) chứ không chỉ đơn thuần là *làm thế nào* (how).

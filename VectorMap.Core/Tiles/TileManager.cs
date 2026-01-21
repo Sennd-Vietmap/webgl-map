@@ -194,23 +194,49 @@ public class TileManager
     
     /// <summary>
     /// Get tiles that should be rendered for the current view
+    /// Support over-zooming by falling back to parent tiles
     /// </summary>
     public IEnumerable<TileData> GetRenderableTiles()
     {
+        // Keep track of which areas are covered to avoid drawing multiple layers of tiles
+        // We actually just yield the best available tile for each slot.
+        // Since we iterate X/Y/Z tiles in view, we need to map them to possibly parent tiles. 
+        // Use a HashSet to avoid yielding the same parent tile multiple times for different children.
+        var yieldedTiles = new HashSet<string>();
+        
         foreach (var tile in TilesInView)
         {
-            var tileData = GetTile(tile);
+            TileData? tileData = null;
+            
+            // 1. Try exact match
+            tileData = GetTile(tile);
+            
+            // 2. If not found or not loaded, try simple parent (standard logic) -> actually standard logic is just exact match
+            // But for over-zooming (e.g. at Z16 looking for Z14), we want to walk UP.
+            
+            var current = tile;
+            while ((tileData == null || !tileData.IsLoaded) && current.Z > 0)
+            {
+                // Try to get data for current
+                tileData = GetTile(current);
+                
+                if (tileData != null && tileData.IsLoaded)
+                {
+                    // Found a loaded tile (either exact or parent)
+                    break;
+                }
+                
+                // Not found, move up
+                current = current.GetParent();
+            }
+            
             if (tileData != null && tileData.IsLoaded)
             {
-                yield return tileData;
-            }
-            else
-            {
-                // Use placeholder
-                var placeholder = GetPlaceholderTile(tile);
-                if (placeholder != null)
+                string key = tileData.Coordinate.ToKey();
+                if (!yieldedTiles.Contains(key))
                 {
-                    yield return placeholder;
+                    yieldedTiles.Add(key);
+                    yield return tileData;
                 }
             }
         }

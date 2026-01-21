@@ -10,7 +10,7 @@ class Program
         {
             Width = 1024,
             Height = 768,
-            Title = "Vector Tile Map - OpenTK",
+            Title = "Vector Tile Map - OpenTK v0.2.0",
             CenterLng = -73.9834558,  // Brooklyn, NY
             CenterLat = 40.6932723,
             Zoom = 13,
@@ -20,6 +20,8 @@ class Program
                 { "water", new byte[] { 180, 240, 250, 255 } },
                 { "landcover", new byte[] { 202, 246, 193, 255 } },
                 { "park", new byte[] { 202, 255, 193, 255 } },
+                { "transportation", new byte[] { 202, 0, 193, 255 } },
+                { "housenumber", new byte[] { 100, 100, 100, 255 } },
                 { "building", new byte[] { 185, 175, 139, 191 } }
             }
         };

@@ -1,4 +1,6 @@
 # Graphics Programming Bridge: WebGL to OpenTK
+**Version: 0.2.0**
+
 ## A Deep Dive for Future Graphics Engineers
 
 This document serves as a bridge for developers moving between WebGL (JavaScript) and OpenTK (.NET), while providing foundational knowledge for modern graphics programming. It details *why* we do things, not just *how*.
