@@ -14,50 +14,69 @@ public static class GeometryConverter
     public static float[] PolygonToVertices(double[][][] coordinates)
     {
         var tess = new Tess();
-        
-        // Add outer ring
-        if (coordinates.Length > 0)
+
+        foreach (var ring in coordinates)
         {
-            var contour = new ContourVertex[coordinates[0].Length];
-            for (int i = 0; i < coordinates[0].Length; i++)
+            if (ring.Length < 3) continue;
+
+            // 1. Clean ring: remove consecutive duplicate points
+            var cleaned = new List<double[]>();
+            for (int i = 0; i < ring.Length; i++)
             {
-                var coord = coordinates[0][i];
-                var (x, y) = MercatorCoordinate.FromLngLat(coord[0], coord[1]);
+                var pt = ring[i];
+                if (cleaned.Count > 0)
+                {
+                    var last = cleaned[^1];
+                    if (Math.Abs(pt[0] - last[0]) < 1e-9 && Math.Abs(pt[1] - last[1]) < 1e-9)
+                        continue;
+                }
+                cleaned.Add(pt);
+            }
+
+            // 2. Remove trailing duplicate if it's the same as first
+            if (cleaned.Count > 2)
+            {
+                var first = cleaned[0];
+                var last = cleaned[^1];
+                if (Math.Abs(first[0] - last[0]) < 1e-9 && Math.Abs(first[1] - last[1]) < 1e-9)
+                {
+                    cleaned.RemoveAt(cleaned.Count - 1);
+                }
+            }
+
+            if (cleaned.Count < 3) continue;
+
+            // 3. Convert to Mercator and add to tessellator
+            var contour = new ContourVertex[cleaned.Count];
+            for (int i = 0; i < cleaned.Count; i++)
+            {
+                var (x, y) = MercatorCoordinate.FromLngLat(cleaned[i][0], cleaned[i][1]);
                 contour[i] = new ContourVertex { Position = new Vec3 { X = (float)x, Y = (float)y, Z = 0 } };
             }
+            tess.AddContour(contour);
+        }
+        
+        try
+        {
+            // Tessellate with a combine callback to handle intersections
+            tess.Tessellate(WindingRule.EvenOdd, ElementType.Polygons, 3, (Vec3 pos, object[] data, float[] weights) => null);
             
-            tess.AddContour(contour);
-        }
-        
-        // Add holes
-        for (int h = 1; h < coordinates.Length; h++)
-        {
-            var hole = coordinates[h];
-            var contour = new ContourVertex[hole.Length];
-            for (int i = 0; i < hole.Length; i++)
+            var vertices = new List<float>();
+            for (int i = 0; i < tess.ElementCount; i++)
             {
-                var (x, y) = MercatorCoordinate.FromLngLat(hole[i][0], hole[i][1]);
-                contour[i] = new ContourVertex { Position = new Vec3 { X = (float)x, Y = (float)y, Z = 0 } };
+                for (int j = 0; j < 3; j++)
+                {
+                    int index = tess.Elements[i * 3 + j];
+                    vertices.Add(tess.Vertices[index].Position.X);
+                    vertices.Add(tess.Vertices[index].Position.Y);
+                }
             }
-            tess.AddContour(contour);
+            return vertices.ToArray();
         }
-        
-        // Tessellate
-        tess.Tessellate(WindingRule.EvenOdd, ElementType.Polygons, 3);
-        
-        // Extract vertices
-        var vertices = new List<float>();
-        for (int i = 0; i < tess.ElementCount; i++)
+        catch
         {
-            for (int j = 0; j < 3; j++)
-            {
-                int index = tess.Elements[i * 3 + j];
-                vertices.Add(tess.Vertices[index].Position.X);
-                vertices.Add(tess.Vertices[index].Position.Y);
-            }
+            return Array.Empty<float>();
         }
-        
-        return vertices.ToArray();
     }
     
     /// <summary>
@@ -69,25 +88,27 @@ public static class GeometryConverter
         
         var vertices = new List<float>();
         
-        // First segment
-        var (x0, y0) = MercatorCoordinate.FromLngLat(coordinates[0][0], coordinates[0][1]);
-        var (x1, y1) = MercatorCoordinate.FromLngLat(coordinates[1][0], coordinates[1][1]);
-        vertices.Add((float)x0);
-        vertices.Add((float)y0);
-        vertices.Add((float)x1);
-        vertices.Add((float)y1);
+        // Use a small threshold to skip duplicate/tiny segments
+        const double epsilon = 1e-9;
         
-        // Subsequent segments - duplicate last point
-        for (int i = 2; i < coordinates.Length; i++)
+        var (xPrev, yPrev) = MercatorCoordinate.FromLngLat(coordinates[0][0], coordinates[0][1]);
+
+        for (int i = 1; i < coordinates.Length; i++)
         {
-            // Duplicate previous end point
-            vertices.Add((float)x1);
-            vertices.Add((float)y1);
+            var (xCurr, yCurr) = MercatorCoordinate.FromLngLat(coordinates[i][0], coordinates[i][1]);
             
-            // Add new end point
-            (x1, y1) = MercatorCoordinate.FromLngLat(coordinates[i][0], coordinates[i][1]);
-            vertices.Add((float)x1);
-            vertices.Add((float)y1);
+            // Skip if segment is effectively zero length
+            if (Math.Abs(xCurr - xPrev) < epsilon && Math.Abs(yCurr - yPrev) < epsilon)
+                continue;
+
+            // Add segment points
+            vertices.Add((float)xPrev);
+            vertices.Add((float)yPrev);
+            vertices.Add((float)xCurr);
+            vertices.Add((float)yCurr);
+            
+            xPrev = xCurr;
+            yPrev = yCurr;
         }
         
         return vertices.ToArray();

@@ -16,6 +16,7 @@ public class MapRenderer : IDisposable
     private int _colorLocation;
     private int _scaleLocation;
     private int _offsetLocation;
+    private int _depthLocation;
     
     private readonly Dictionary<string, Color4> _layerColors;
     private bool _isInitialized;
@@ -72,6 +73,7 @@ public class MapRenderer : IDisposable
         _colorLocation = GL.GetUniformLocation(_shaderProgram, "uColor");
         _scaleLocation = GL.GetUniformLocation(_shaderProgram, "uScale");
         _offsetLocation = GL.GetUniformLocation(_shaderProgram, "uOffset");
+        _depthLocation = GL.GetUniformLocation(_shaderProgram, "uDepth");
         
         // Create VAO and VBO
         _vao = GL.GenVertexArray();
@@ -145,19 +147,26 @@ public class MapRenderer : IDisposable
         }
 
         // 2. Render layers in the predefined order
+        float currentDepth = 0.0f;
+        const float depthStep = 0.000001f;
+
         foreach (var layerName in GlobalLayerOrder)
         {
             if (layerGroups.TryGetValue(layerName, out var group))
             {
+                GL.Uniform1(_depthLocation, currentDepth);
                 RenderGroup(group, disabledLayers);
                 layerGroups.Remove(layerName);
+                currentDepth += depthStep;
             }
         }
 
         // 3. Render any remaining layers (unrecognized)
         foreach (var group in layerGroups.Values)
         {
+            GL.Uniform1(_depthLocation, currentDepth);
             RenderGroup(group, disabledLayers);
+            currentDepth += depthStep;
         }
         
         GL.BindVertexArray(0);
@@ -221,10 +230,14 @@ public class MapRenderer : IDisposable
             @"#version 330 core
 layout (location = 0) in vec2 aPosition;
 uniform mat4 uMatrix;
+uniform float uScale;
+uniform vec2 uOffset;
+uniform float uDepth;
 void main()
 {
+    vec2 pos = (aPosition - uOffset) * uScale;
     gl_PointSize = 3.0;
-    gl_Position = uMatrix * vec4(aPosition, 0.0, 1.0);
+    gl_Position = uMatrix * vec4(pos, uDepth, 1.0);
 }" :
             @"#version 330 core
 out vec4 FragColor;
