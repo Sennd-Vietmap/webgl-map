@@ -215,20 +215,54 @@ public class Camera
     }
     
     /// <summary>
-    /// Convert screen coordinates to world coordinates
+    /// Convert screen coordinates to world coordinates (Intersection with Z=0 plane)
     /// </summary>
     public (double x, double y) ScreenToWorld(float screenX, float screenY, int screenWidth, int screenHeight)
     {
-        // Convert to clip space (-1 to 1)
-        double clipX = (screenX / screenWidth) * 2 - 1;
-        double clipY = (1 - screenY / screenHeight) * 2 - 1;
+        // 1. Calculate Clip Space Coordinates (-1 to 1)
+        // Y is inverted (Screen top=0 -> Clip top=1)
+        float clipX = (screenX / screenWidth) * 2.0f - 1.0f;
+        float clipY = (1.0f - screenY / screenHeight) * 2.0f - 1.0f; // 1 - ... moves origin to bottom
+
+        // 2. Unproject near and far points to get a ray
+        Matrix4 invViewProj = Matrix4.Invert(GetViewProjectionMatrix());
+
+        // Near Plane (Z = -1 in OpenGL, or 0? OpenTK default projection uses -1..1)
+        Vector4 nearIso = new Vector4(clipX, clipY, -1.0f, 1.0f);
+        Vector4 farIso = new Vector4(clipX, clipY, 1.0f, 1.0f);
+
+        // Transform to World Space
+        Vector4 nearWorld = Vector4.TransformRow(nearIso, invViewProj);
+        Vector4 farWorld = Vector4.TransformRow(farIso, invViewProj);
+
+        // Perspective Divide
+        Vector3 near = nearWorld.Xyz / nearWorld.W;
+        Vector3 far = farWorld.Xyz / farWorld.W;
+
+        // 3. Ray-Plane Intersection (Plane Z = 0)
+        // Ray: P(t) = near + t * (far - near)
+        // We want P(t).z = 0
+        // near.z + t * (far.z - near.z) = 0
+        // t = -near.z / (far.z - near.z)
         
-        // Invert the view-projection matrix
-        var invMat = Matrix4.Invert(GetViewProjectionMatrix());
-        var clipPos = new Vector4((float)clipX, (float)clipY, 0, 1);
-        var worldPos = Vector4.TransformRow(clipPos, invMat);
+        Vector3 dir = far - near;
         
-        return (worldPos.X, worldPos.Y);
+        // Check if parallel to plane (unlikely unless horizon is perfectly center line?)
+        if (Math.Abs(dir.Z) < 1e-6)
+        {
+            // Fallback: Just return camera center or near val?
+            return (X, Y);
+        }
+
+        float t = -near.Z / dir.Z;
+
+        // Validation: If t < 0, the intersection is behind the near plane (behind camera?)
+        // If the point is above the horizon, the ray might not hit Z=0 (t could be huge or negative?)
+        // The ViewProjection transforms world Z=0 to valid clip space usually.
+        
+        Vector3 intersection = near + dir * t;
+
+        return (intersection.X, intersection.Y);
     }
     
     /// <summary>
