@@ -119,3 +119,22 @@ When you see a blank screen, the GPU fails silently. Use this checklist:
 *   **OpenTK** offers raw power and strict control.
 *   **The Math** is universal, but **API Syntax** changes.
 *   **Always** draw a debug triangle first.
+
+---
+
+## 6. Advanced Topics: UI and 3D Camera
+
+### Integration UI (ImGui)
+Adding a User Interface (buttons, charts) to a raw OpenGL context is difficult. We integrated **ImGui.NET** because it uses **Immediate Mode** rendering:
+- **Retained Mode (WPF/WinForms)**: You create a Button object, and the framework remembers it.
+- **Immediate Mode (ImGui)**: You say `if (Button("Click Me")) { ... }` every frame. The UI is rebuilt and drawn from scratch 60 times a second.
+- **Benefit**: Extremely easy to sync with game state. No "event listeners" needed for simple debug tools.
+
+### 3D Map Rendering
+Moving from 2D to 3D tiles involves a Perspective Projection:
+- **Pitch (Tilt)**: Rotating around the X-axis. We intentionally limit this to ~85° because viewing a flat map at 90° (edge-on) causes Z-fighting and geometry disappearance.
+- **Matrix Order**: In OpenTK (Row Vectors), the order is critical:
+  `World = Scale * Translate`
+  `View = RotateZ(Bearing) * RotateX(Pitch) * Translate(0, 0, -Altitude)`
+  This effectively "moves the world away" from the static camera.
+
