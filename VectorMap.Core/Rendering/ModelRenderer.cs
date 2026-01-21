@@ -10,6 +10,7 @@ public class ModelRenderer : IDisposable
     private int _matrixLocation;
     private int _modelMatrixLocation;
     private int _lightPosLocation;
+    private int _viewPosLocation;
     
     private bool _isInitialized;
     private readonly List<(int vao, int vbo, int ebo, int count)> _glMeshes = new();
@@ -44,18 +45,43 @@ in vec4 vColor;
 out vec4 FragColor;
 
 uniform vec3 uLightPos;
+uniform vec3 uViewPos;
 
 void main() {
+    // Basic sRGB to Linear (approx)
+    vec3 color = pow(vColor.rgb, vec3(2.2));
+    
+    // Lighting components
     vec3 norm = normalize(vNormal);
     vec3 lightDir = normalize(uLightPos - vFragPos);
-    float diff = max(dot(norm, lightDir), 0.3); // 0.3 ambient
-    FragColor = vec4(vColor.rgb * diff, vColor.a);
+    vec3 viewDir = normalize(uViewPos - vFragPos);
+    vec3 halfwayDir = normalize(lightDir + viewDir);
+
+    // Ambient
+    vec3 ambient = 0.25 * color;
+
+    // Diffuse
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * color;
+
+    // Specular (Blinn-Phong)
+    float spec = pow(max(dot(norm, halfwayDir), 0.0), 32.0);
+    vec3 specular = vec3(0.3) * spec; // Fixed white specular
+
+    // Final result
+    vec3 lighting = ambient + diffuse + specular;
+
+    // Linear to sRGB (Gamma correction)
+    lighting = pow(lighting, vec3(1.0/2.2));
+    
+    FragColor = vec4(lighting, vColor.a);
 }";
 
         _shaderProgram = CompileProgram(vertexSource, fragmentSource);
         _matrixLocation = GL.GetUniformLocation(_shaderProgram, "uMatrix");
         _modelMatrixLocation = GL.GetUniformLocation(_shaderProgram, "uModelMatrix");
         _lightPosLocation = GL.GetUniformLocation(_shaderProgram, "uLightPos");
+        _viewPosLocation = GL.GetUniformLocation(_shaderProgram, "uViewPos");
 
         _isInitialized = true;
     }
@@ -99,10 +125,11 @@ void main() {
 
     public void Render(Camera camera, Vector3 position, float scaleMeters)
     {
-        if (!_isInitialized || _glMeshes.Count == 0) return;
+        if (!_isInitialized || _glMeshes.Count == 0 || camera == null) return;
 
         GL.UseProgram(_shaderProgram);
         GL.Enable(EnableCap.DepthTest);
+        GL.DepthFunc(DepthFunction.Less);
 
         Matrix4 vp = camera.GetViewProjectionMatrix();
         GL.UniformMatrix4(_matrixLocation, false, ref vp);
@@ -113,7 +140,12 @@ void main() {
         Matrix4 modelMatrix = Matrix4.CreateScale(scaleFactor) * Matrix4.CreateTranslation(position);
         GL.UniformMatrix4(_modelMatrixLocation, false, ref modelMatrix);
         
-        GL.Uniform3(_lightPosLocation, position + new Vector3(0.01f, 0.05f, 0.1f));
+        // Use a more "sun-like" directional light position (distant)
+        Vector3 sunPosition = position + new Vector3(-0.05f, 0.05f, 0.2f); // High, slightly offset
+        GL.Uniform3(_lightPosLocation, sunPosition);
+
+        // View position from camera (in Mercator space)
+        GL.Uniform3(_viewPosLocation, new Vector3((float)camera.X, (float)camera.Y, 0.1f));
 
         foreach (var mesh in _glMeshes)
         {
