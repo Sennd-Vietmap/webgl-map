@@ -37,6 +37,8 @@ namespace VectorMap.WinForms
         private bool _isModelLoading = false;
         private GLBModel? _pendingModel;
         private DateTime _lastViewportUpdate = DateTime.MinValue;
+        private System.Windows.Forms.Timer _debounceTimer;
+        private double _lastUpdateX, _lastUpdateY, _lastUpdateZoom;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -88,6 +90,14 @@ namespace VectorMap.WinForms
             };
             
             _isInitialized = true;
+
+            // Debounce timer for viewport updates (500ms delay after interaction stops)
+            _debounceTimer = new System.Windows.Forms.Timer();
+            _debounceTimer.Interval = 500;
+            _debounceTimer.Tick += (s, args) => {
+                _debounceTimer.Stop();
+                UpdateViewportImmediate();
+            };
         }
 
         protected override void OnResize(EventArgs e)
@@ -122,13 +132,32 @@ namespace VectorMap.WinForms
             GL.ClearColor(Color.FromArgb(240, 240, 240));
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-            // Throttled Viewport Update (Avoid lag during expensive tile processing)
-            // Only update "what tiles are needed" every 100ms or when interaction stops
+            // Intelligent Viewport Management
             bool isMoving = _isDragging || _isRotating;
-            if (!isMoving || (DateTime.Now - _lastViewportUpdate).TotalMilliseconds > 150)
+            
+            // 1. Check for Viewport Exhaustion (Move out of current loaded area)
+            // If we move more than 0.5 tiles or zoom changes significantly, update immediately
+            double zoomDiff = Math.Abs(_camera.Zoom - _lastUpdateZoom);
+            double distSq = Math.Pow(_camera.X - _lastUpdateX, 2) + Math.Pow(_camera.Y - _lastUpdateY, 2);
+            double threshold = 0.5 / Math.Pow(2, _camera.Zoom); // 0.5 tile distance
+            
+            bool isOutOfSync = zoomDiff > 0.01 || distSq > 1e-12;
+
+            if (zoomDiff > 0.5 || distSq > threshold * threshold)
             {
-                _tileManager.UpdateViewport(_camera.GetBounds(), (int)_camera.Zoom);
-                _lastViewportUpdate = DateTime.Now;
+                UpdateViewportImmediate();
+                _debounceTimer.Stop(); 
+            }
+            else if (isOutOfSync)
+            {
+                // Debounce regular updates (Wait for 0.5s stop)
+                _debounceTimer.Stop();
+                _debounceTimer.Start();
+            }
+            else 
+            {
+                // Stay quiet if we are already in sync
+                _debounceTimer.Stop();
             }
 
             // Render Map
@@ -232,6 +261,18 @@ namespace VectorMap.WinForms
             {
                 _isModelLoading = false;
             }
+        }
+
+        private void UpdateViewportImmediate()
+        {
+            if (_camera == null || _tileManager == null) return;
+            
+            _tileManager.UpdateViewport(_camera.GetBounds(), (int)_camera.Zoom);
+            _lastUpdateX = _camera.X;
+            _lastUpdateY = _camera.Y;
+            _lastUpdateZoom = _camera.Zoom;
+            _lastViewportUpdate = DateTime.Now;
+            Invalidate(); // Refresh with new tiles
         }
     }
 }
