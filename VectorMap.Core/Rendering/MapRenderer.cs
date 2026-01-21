@@ -2,7 +2,7 @@ using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using VectorMap.Core.Tiles;
 
-namespace VectorMap.Desktop;
+namespace VectorMap.Core.Rendering;
 
 /// <summary>
 /// OpenGL renderer for vector tile map layers
@@ -40,7 +40,7 @@ public class MapRenderer : IDisposable
     {
         if (_isInitialized) return;
         
-        // Load and compile shaders
+        // Load and compile shaders - fall back to defaults if files not found
         string vertexSource = LoadShaderSource("Shaders/vertex.glsl");
         string fragmentSource = LoadShaderSource("Shaders/fragment.glsl");
         
@@ -154,34 +154,6 @@ public class MapRenderer : IDisposable
         
         GL.BindVertexArray(0);
         GL.UseProgram(0);
-    }
-    
-    /// <summary>
-    /// Debug: Render a simple triangle to verify OpenGL pipeline
-    /// </summary>
-    private void RenderDebugTriangle()
-    {
-        // Identity matrix = no transformation, vertices in clip space
-        var identity = Matrix4.Identity;
-        GL.UniformMatrix4(_matrixLocation, false, ref identity);
-        
-        // Bright red color
-        GL.Uniform4(_colorLocation, 1.0f, 0.0f, 0.0f, 1.0f);
-        
-        // Triangle vertices at the tile location (Brooklyn ~-0.41, 0.25)
-        float[] vertices = new float[]
-        {
-            -0.45f, 0.20f,   // bottom left
-            -0.35f, 0.20f,   // bottom right
-            -0.40f, 0.30f    // top center
-        };
-        
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.DynamicDraw);
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
-        GL.EnableVertexAttribArray(0);
-        
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
     }
     
     /// <summary>

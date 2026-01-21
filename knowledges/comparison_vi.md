@@ -152,3 +152,25 @@ Khi zoom trong 2D, ta chỉ đơn giản là unproject $(X, Y)$. Trong 3D (khi c
 *   **Double vs Float**: GPU xử lý tốt với `float` (Matrix4) vì các đỉnh (vertex) được tính tương đối so với camera. Tuy nhiên, để **Picking** (ScreenToWorld) ở Zoom 20, sự chênh lệch tọa độ nhỏ hơn độ chính xác của `float` ($10^{-7}$).
     *   **Giải pháp**: Cài đặt một luồng xử lý `Matrix4d` (Double Precision) riêng biệt cho tính toán trên CPU (Picking/Panning). Không dựa vào việc nghịch đảo `Matrix4` ở mức zoom lớn.
 
+---
+
+## 7. Tích hợp WinForms: Nhúng Bản đồ vào Ứng dụng
+Trong các dự án doanh nghiệp, bản đồ thường cần là một **Control** bên trong một Dashboard lớn, thay vì một cửa sổ độc lập.
+
+### Lựa chọn Package
+*   **Package**: `OpenTK.GLControl` (Phiên bản 4.0.2+).
+*   *Lưu ý*: Tranh các phiên bản prerelease cũ hơn của `OpenTK.WinForms` nếu bạn gặp lỗi "WGL Failed". `GLControl` hiện là chuẩn mực để nhúng OpenTK vào WinForms.
+
+### "Bí kíp sinh tồn" cho WinForms Designer
+Trình thiết kế (Designer) của Visual Studio **sẽ bị cash** nếu Control của bạn cố gắng thực thi code OpenGL (vì designer không có ngữ cảnh GPU thực sự).
+
+1.  **Gác cổng (Safety Guards)**: Luôn kiểm tra `if (DesignMode) return;` ở đầu các hàm `OnLoad`, `OnResize`, và `OnPaint`.
+2.  **Khởi tạo lười (Lazy Initialization)**: Đừng gọi `renderer.Initialize()` trong constructor hay `OnLoad`. Thay vào đó, hãy khởi tạo ở **lần paint đầu tiên** khi Window Handle thực sự đã được tạo và hiển thị.
+3.  **Handle Creation**: WinForms tạo handle một cách chậm trễ (lazily). Hãy đợi đến khi `IsHandleCreated == true` trước khi gọi `MakeCurrent()`.
+
+### Kiến trúc Module (Dự án Core)
+Khi chuyển từ app độc lập sang Control, hãy **Tái cấu trúc (Refactor)** logic của bạn:
+- Di chuyển `Camera`, `TileManager`, `MapRenderer`, và `MapOptions` vào một thư viện `Core` (Class Library).
+- Điều này cho phép cả `VectorMap.Desktop` (OpenTK GameWindow) và `VectorMap.WinForms` (GLControl) dùng chung một logic render duy nhất, đảm bảo trải nghiệm người dùng đồng nhất.
+
+

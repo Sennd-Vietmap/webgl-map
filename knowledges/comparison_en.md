@@ -152,3 +152,25 @@ When zooming in 2D, we simply unproject $(X, Y)$. In 3D (Pitched View), this fai
 *   **Double vs Float**: GPU rendering works fine with `float` (Matrix4) because vertices are relative to the camera. However, for **Picking** (ScreenToWorld) at Zoom 20, the coordinate differences are smaller than `float` precision ($10^{-7}$).
     *   **Solution**: Implement a shadow `Matrix4d` (Double Precision) pipeline for CPU-side calculations (Picking/Panning). Do not rely on valid `Matrix4` inversion at high zoom levels.
 
+---
+
+## 7. WinForms Integration: Embedding the Map
+In enterprise scenarios, the map often needs to be a **Control** inside a larger Dashboard, rather than a standalone window.
+
+### Choice of Package
+*   **Package**: `OpenTK.GLControl` (Version 4.0.2+).
+*   *Note*: Avoid older `OpenTK.WinForms` prereleases if you encounter "WGL Failed" errors. `GLControl` is the current standard for embedding.
+
+### Survival Guide for the WinForms Designer
+The Visual Studio Designer **will crash** if your control tries to execute OpenGL code (it has no GPU context inside the designer process).
+
+1.  **Safety Guards**: Always check `if (DesignMode) return;` at the start of `OnLoad`, `OnResize`, and `OnPaint`.
+2.  **Lazy Initialization**: Do not call `renderer.Initialize()` in the constructor or `OnLoad`. Instead, initialize on the **first paint call** when the Window Handle is actually created and visible.
+3.  **Handle Creation**: WinForms creates handles lazily. Wait for `IsHandleCreated == true` before calling `MakeCurrent()`.
+
+### Modular Architecture (Core Project)
+When moving from a standalone app to a Control, **Refactor Your Logic**:
+- Move `Camera`, `TileManager`, `MapRenderer`, and `MapOptions` into a `Core` class library.
+- This allows both `VectorMap.Desktop` (OpenTK GameWindow) and `VectorMap.WinForms` (GLControl) to share the exact same rendering logic, ensuring a consistent user experience.
+
+

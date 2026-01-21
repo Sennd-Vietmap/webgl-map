@@ -1,4 +1,6 @@
-﻿namespace VectorMap.Desktop;
+﻿using VectorMap.Core;
+
+namespace VectorMap.Desktop;
 
 class Program
 {

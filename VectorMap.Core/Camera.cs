@@ -2,7 +2,7 @@ using OpenTK.Mathematics;
 using VectorMap.Core.Projection;
 using VectorMap.Core.Tiles;
 
-namespace VectorMap.Desktop;
+namespace VectorMap.Core;
 
 /// <summary>
 /// Camera for 2D map navigation with pan and zoom
@@ -210,7 +210,6 @@ public class Camera
         x2 = x2 / zoomScale / TileSize;
         y2 = y2 / zoomScale / TileSize;
         
-        // Get LngLat bounding box
         // Get LngLat bounding box
         double minLng = MercatorCoordinate.LngFromMercatorX(x1);
         double minLat = MercatorCoordinate.LatFromMercatorY(y1); // y1 is bottom (larger y) -> min lat
