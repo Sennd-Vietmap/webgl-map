@@ -127,7 +127,8 @@ namespace VectorMap.WinForms
             // Try to load GLB if exists, otherwise use Cube
             if (!_modelLoaded) {
                 try {
-                    string glbPath = "VectorMap.Core/Assets/Models/box.glb";
+                    //string glbPath = "VectorMap.Core/Assets/Models/box.glb";
+                    string glbPath = "D:\\RepoVietmap\\maps-api-group\\traning\\webgl-map\\VectorMapOpenTK\\VectorMap.Core\\Assets\\Models\\box.glb";
                     if (System.IO.File.Exists(glbPath)) {
                         _modelRenderer.LoadModel(GLBModel.Load(glbPath));
                     } else {
@@ -139,7 +140,7 @@ namespace VectorMap.WinForms
                 _modelLoaded = true;
             }
 
-            _modelRenderer.Render(_camera, _modelPosition, 50.0f, Color4.Red); // 50 meters wide
+            _modelRenderer.Render(_camera, _modelPosition, 50.0f); // 50 meters wide
 
             // FPS Counter
             _frameCount++;
