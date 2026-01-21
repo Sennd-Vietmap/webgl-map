@@ -1,0 +1,250 @@
+using OpenTK.Graphics.OpenGL4;
+using OpenTK.Mathematics;
+using VectorMap.Core.Tiles;
+
+namespace VectorMap.Desktop;
+
+/// <summary>
+/// OpenGL renderer for vector tile map layers
+/// </summary>
+public class MapRenderer : IDisposable
+{
+    private int _shaderProgram;
+    private int _vao;
+    private int _vbo;
+    private int _matrixLocation;
+    private int _colorLocation;
+    
+    private readonly Dictionary<string, Color4> _layerColors;
+    private bool _isInitialized;
+    
+    public MapRenderer(Dictionary<string, Color4>? layerColors = null)
+    {
+        _layerColors = layerColors ?? new Dictionary<string, Color4>
+        {
+            { "water", new Color4(180/255f, 240/255f, 250/255f, 1f) },
+            { "landcover", new Color4(202/255f, 246/255f, 193/255f, 1f) },
+            { "park", new Color4(202/255f, 255/255f, 193/255f, 1f) },
+            { "building", new Color4(185/255f, 175/255f, 139/255f, 0.75f) }
+        };
+    }
+    
+    /// <summary>
+    /// Initialize OpenGL resources
+    /// </summary>
+    public void Initialize()
+    {
+        if (_isInitialized) return;
+        
+        // Load and compile shaders
+        string vertexSource = LoadShaderSource("Shaders/vertex.glsl");
+        string fragmentSource = LoadShaderSource("Shaders/fragment.glsl");
+        
+        int vertexShader = CompileShader(ShaderType.VertexShader, vertexSource);
+        int fragmentShader = CompileShader(ShaderType.FragmentShader, fragmentSource);
+        
+        // Create shader program
+        _shaderProgram = GL.CreateProgram();
+        GL.AttachShader(_shaderProgram, vertexShader);
+        GL.AttachShader(_shaderProgram, fragmentShader);
+        GL.LinkProgram(_shaderProgram);
+        
+        // Check for linking errors
+        GL.GetProgram(_shaderProgram, GetProgramParameterName.LinkStatus, out int success);
+        if (success == 0)
+        {
+            string infoLog = GL.GetProgramInfoLog(_shaderProgram);
+            throw new Exception($"Shader program linking failed: {infoLog}");
+        }
+        
+        // Clean up shaders (they're linked into the program now)
+        GL.DetachShader(_shaderProgram, vertexShader);
+        GL.DetachShader(_shaderProgram, fragmentShader);
+        GL.DeleteShader(vertexShader);
+        GL.DeleteShader(fragmentShader);
+        
+        // Get uniform locations
+        _matrixLocation = GL.GetUniformLocation(_shaderProgram, "uMatrix");
+        _colorLocation = GL.GetUniformLocation(_shaderProgram, "uColor");
+        
+        // Create VAO and VBO
+        _vao = GL.GenVertexArray();
+        _vbo = GL.GenBuffer();
+        
+        GL.BindVertexArray(_vao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        
+        // Set up vertex attributes
+        GL.EnableVertexAttribArray(0);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        
+        GL.BindVertexArray(0);
+        
+        _isInitialized = true;
+    }
+    
+    /// <summary>
+    /// Render all tiles with the given camera
+    /// </summary>
+    public void Render(Camera camera, IEnumerable<TileData> tiles, HashSet<string>? disabledLayers = null)
+    {
+        if (!_isInitialized)
+        {
+            Initialize();
+        }
+        
+        GL.UseProgram(_shaderProgram);
+        GL.BindVertexArray(_vao);
+        
+        // DEBUG: Render a test triangle with identity matrix to verify pipeline works
+        RenderDebugTriangle();
+        
+        // Set matrix uniform - DEBUG: Use identity matrix to test if tiles render at all
+        // Matrix4 matrix = camera.GetViewProjectionMatrix();
+        Matrix4 matrix = Matrix4.Identity;
+        GL.UniformMatrix4(_matrixLocation, false, ref matrix);
+        
+        // Render each tile
+        foreach (var tile in tiles)
+        {
+            foreach (var featureSet in tile.FeatureSets)
+            {
+                // Skip disabled layers
+                if (disabledLayers?.Contains(featureSet.LayerName) == true)
+                    continue;
+                    
+                // Skip if no color defined for this layer
+                if (!_layerColors.TryGetValue(featureSet.LayerName, out var color))
+                    continue;
+                    
+                // Skip empty vertex arrays
+                if (featureSet.Vertices.Length == 0)
+                    continue;
+                
+                // Set color uniform (Color4 is already 0-1 range)
+                GL.Uniform4(_colorLocation, color.R, color.G, color.B, color.A);
+                
+                // Upload vertices
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, featureSet.Vertices.Length * sizeof(float), 
+                    featureSet.Vertices, BufferUsageHint.DynamicDraw);
+                
+                // Re-setup vertex attribute pointer after uploading new data
+                GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+                GL.EnableVertexAttribArray(0);
+                
+                // Draw based on geometry type
+                PrimitiveType primitiveType = featureSet.Type switch
+                {
+                    GeometryType.Point => PrimitiveType.Points,
+                    GeometryType.Line => PrimitiveType.Lines,
+                    _ => PrimitiveType.Triangles
+                };
+                
+                int vertexCount = featureSet.Vertices.Length / 2;
+                GL.DrawArrays(primitiveType, 0, vertexCount);
+            }
+        }
+        
+        GL.BindVertexArray(0);
+        GL.UseProgram(0);
+    }
+    
+    /// <summary>
+    /// Debug: Render a simple triangle to verify OpenGL pipeline
+    /// </summary>
+    private void RenderDebugTriangle()
+    {
+        // Identity matrix = no transformation, vertices in clip space
+        var identity = Matrix4.Identity;
+        GL.UniformMatrix4(_matrixLocation, false, ref identity);
+        
+        // Bright red color
+        GL.Uniform4(_colorLocation, 1.0f, 0.0f, 0.0f, 1.0f);
+        
+        // Triangle vertices in clip space (-1 to 1)
+        float[] vertices = new float[]
+        {
+            -0.5f, -0.5f,   // bottom left
+             0.5f, -0.5f,   // bottom right
+             0.0f,  0.5f    // top center
+        };
+        
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.DynamicDraw);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+        
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+    }
+    
+    /// <summary>
+    /// Set color for a layer
+    /// </summary>
+    public void SetLayerColor(string layer, Color4 color)
+    {
+        _layerColors[layer] = color;
+    }
+    
+    private static string LoadShaderSource(string path)
+    {
+        // Try to load from file first
+        if (File.Exists(path))
+        {
+            return File.ReadAllText(path);
+        }
+        
+        // Try relative to executable
+        string exePath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".";
+        string fullPath = Path.Combine(exePath, path);
+        if (File.Exists(fullPath))
+        {
+            return File.ReadAllText(fullPath);
+        }
+        
+        // Fallback to embedded shaders
+        return path.Contains("vertex") ? 
+            @"#version 330 core
+layout (location = 0) in vec2 aPosition;
+uniform mat4 uMatrix;
+void main()
+{
+    gl_PointSize = 3.0;
+    gl_Position = uMatrix * vec4(aPosition, 0.0, 1.0);
+}" :
+            @"#version 330 core
+out vec4 FragColor;
+uniform vec4 uColor;
+void main()
+{
+    FragColor = uColor;
+}";
+    }
+    
+    private static int CompileShader(ShaderType type, string source)
+    {
+        int shader = GL.CreateShader(type);
+        GL.ShaderSource(shader, source);
+        GL.CompileShader(shader);
+        
+        GL.GetShader(shader, ShaderParameter.CompileStatus, out int success);
+        if (success == 0)
+        {
+            string infoLog = GL.GetShaderInfoLog(shader);
+            throw new Exception($"Shader compilation failed ({type}): {infoLog}");
+        }
+        
+        return shader;
+    }
+    
+    public void Dispose()
+    {
+        if (_isInitialized)
+        {
+            GL.DeleteVertexArray(_vao);
+            GL.DeleteBuffer(_vbo);
+            GL.DeleteProgram(_shaderProgram);
+            _isInitialized = false;
+        }
+    }
+}
