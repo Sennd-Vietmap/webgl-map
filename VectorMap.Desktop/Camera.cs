@@ -215,54 +215,123 @@ public class Camera
     }
     
     /// <summary>
-    /// Convert screen coordinates to world coordinates (Intersection with Z=0 plane)
+    /// Convert screen coordinates to world coordinates using Double Precision Ray Casting
     /// </summary>
     public (double x, double y) ScreenToWorld(float screenX, float screenY, int screenWidth, int screenHeight)
     {
-        // 1. Calculate Clip Space Coordinates (-1 to 1)
-        // Y is inverted (Screen top=0 -> Clip top=1)
-        float clipX = (screenX / screenWidth) * 2.0f - 1.0f;
-        float clipY = (1.0f - screenY / screenHeight) * 2.0f - 1.0f; // 1 - ... moves origin to bottom
-
-        // 2. Unproject near and far points to get a ray
-        Matrix4 invViewProj = Matrix4.Invert(GetViewProjectionMatrix());
-
-        // Near Plane (Z = -1 in OpenGL, or 0? OpenTK default projection uses -1..1)
-        Vector4 nearIso = new Vector4(clipX, clipY, -1.0f, 1.0f);
-        Vector4 farIso = new Vector4(clipX, clipY, 1.0f, 1.0f);
-
-        // Transform to World Space
-        Vector4 nearWorld = Vector4.TransformRow(nearIso, invViewProj);
-        Vector4 farWorld = Vector4.TransformRow(farIso, invViewProj);
-
-        // Perspective Divide
-        Vector3 near = nearWorld.Xyz / nearWorld.W;
-        Vector3 far = farWorld.Xyz / farWorld.W;
-
-        // 3. Ray-Plane Intersection (Plane Z = 0)
-        // Ray: P(t) = near + t * (far - near)
-        // We want P(t).z = 0
-        // near.z + t * (far.z - near.z) = 0
-        // t = -near.z / (far.z - near.z)
+        // 1. Viewport Parameters (Double Precision)
+        double viewportW = screenWidth;
+        double viewportH = screenHeight;
         
-        Vector3 dir = far - near;
+        // 2. Constants matching GetViewProjectionMatrix
+        // FOV = 60 degrees
+        double fovRad = MathHelper.DegreesToRadians(60.0);
+        double fovTan = Math.Tan(fovRad / 2.0);
         
-        // Check if parallel to plane (unlikely unless horizon is perfectly center line?)
-        if (Math.Abs(dir.Z) < 1e-6)
-        {
-            // Fallback: Just return camera center or near val?
-            return (X, Y);
-        }
-
-        float t = -near.Z / dir.Z;
-
-        // Validation: If t < 0, the intersection is behind the near plane (behind camera?)
-        // If the point is above the horizon, the ray might not hit Z=0 (t could be huge or negative?)
-        // The ViewProjection transforms world Z=0 to valid clip space usually.
+        // Camera Altitude in "World Pixels" (Constant for a given Viewport Height + FOV)
+        double altitude = (viewportH / 2.0) / fovTan;
         
-        Vector3 intersection = near + dir * t;
-
-        return (intersection.X, intersection.Y);
+        // 3. NDC Coordinates
+        // Y is inverted (0 at top -> 1 at bottom? No, Screen Y is 0 top. NDC Y is 1 top.)
+        // So Screen(0) -> NDC(1). Screen(H) -> NDC(-1).
+        double ndcX = (screenX / viewportW) * 2.0 - 1.0;
+        double ndcY = 1.0 - (screenY / viewportH) * 2.0;
+        
+        // 4. Ray Direction in View Space
+        // Camera is at (0,0,0) look at (0,0,-1)
+        // Aspect Ratio logic: x needs to be wider
+        double aspect = viewportW / viewportH;
+        
+        double dirX = ndcX * aspect * fovTan;
+        double dirY = ndcY * fovTan;
+        double dirZ = -1.0; // Pointing forward into screen
+        
+        // 5. Un-Rotate Ray (Inverse View Matrix)
+        // Forward: RotZ(Bearing) * RotX(-Pitch)
+        // Inverse: RotX(Pitch) * RotZ(-Bearing)
+        
+        double pitchRad = MathHelper.DegreesToRadians(Pitch);
+        double bearingRad = MathHelper.DegreesToRadians(Bearing);
+        
+        // 5a. Rotate X (Pitch)
+        // y' = y*cos(P) - z*sin(P)
+        // z' = y*sin(P) + z*cos(P)
+        double cosP = Math.Cos(pitchRad);
+        double sinP = Math.Sin(pitchRad);
+        
+        double dy_p = dirY * cosP - dirZ * sinP;
+        double dz_p = dirY * sinP + dirZ * cosP;
+        double dx_p = dirX; // Unchanged
+        
+        // 5b. Rotate Z (-Bearing)
+        // Angle = -Bearing
+        // x' = x*cos(A) - y*sin(A)
+        // y' = x*sin(A) + y*cos(A)
+        double negBearing = -bearingRad;
+        double cosB = Math.Cos(negBearing);
+        double sinB = Math.Sin(negBearing);
+        
+        double dx_w = dx_p * cosB - dy_p * sinB;
+        double dy_w = dx_p * sinB + dy_p * cosB;
+        double dz_w = dz_p; // Unchanged
+        
+        // Ray Direction World
+        double rayX = dx_w;
+        double rayY = dy_w;
+        double rayZ = dz_w;
+        
+        // 6. Intersection with Plane Z = 0
+        // Ray Origin (Ro) is Camera Position in Pivot-Space.
+        // ScreenToWorld logic effectively puts the "Pivot" (Center of Screen) at (0,0,0).
+        // The "World Plane" is shifted by -Altitude relative to Camera?
+        // No, in View Space, Camera is at (0,0,0). World is translated by (0,0,-Alt).
+        // So World Plane is at Z = -Altitude?
+        // Let's re-verify GetViewProjection logic:
+        // view *= Translate(0, 0, -altitude).
+        // This MOVES THE WORLD Z by -altitude.
+        // So if Camera is at 0, World Surface is at -Altitude.
+        // Yes.
+        
+        // We want to intersect Ray (Origin=0, Dir) with Plane Z = -Altitude.
+        // rayZ * t = -Altitude
+        // t = -Altitude / rayZ
+        
+        if (Math.Abs(rayZ) < 1e-9) return (X, Y); // Parallel to horizon
+        
+        double t = -altitude / rayZ;
+        
+        // If t < 0, intersection is behind camera (shouldn't happen for ground plane unless pitched up)
+        // But with Pitch < 90, rayZ should be negative (pointing down).
+        // -Alt is negative. Neg/Neg = Pos.
+        
+        double intersectX = rayX * t;
+        double intersectY = rayY * t;
+        
+        // 7. Convert Intersection to Global Mercator
+        // The "Pivot" (0,0) in this space corresponds to the Camera Center (Camera.X, Camera.Y).
+        // The World Transformation scaled Global(0..1) by WorldSize(pixels).
+        // And flipped Y?
+        // model *= Scale(S, -S, 1);
+        // model *= Translate(-Cx*S, -Cy*S, 0); -> No, that was my manual derivation.
+        // Code Is: 
+        // worldTransform = Translate(-X, -Y, 0)
+        // worldTransform *= Scale(S, -S, 1)
+        
+        // So converting from Global to Pivot-Pixels:
+        // P_pix = (P_global - C_global) * ScaleVect
+        // P_pix.x = (P.x - C.x) * S
+        // P_pix.y = (P.y - C.y) * -S
+        
+        // We have P_pix (intersectX, intersectY). We want P.x.
+        // intersectX / S = P.x - C.x  => P.x = C.x + intersectX/S
+        // intersectY / -S = P.y - C.y => P.y = C.y - intersectY/S
+        
+        double worldSize = TileSize * Math.Pow(2, Zoom);
+        
+        double finalX = X + (intersectX / worldSize);
+        double finalY = Y - (intersectY / worldSize);
+        
+        return (finalX, finalY);
     }
     
     /// <summary>
