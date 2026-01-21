@@ -138,3 +138,12 @@ Moving from 2D to 3D tiles involves a Perspective Projection:
   `View = RotateZ(Bearing) * RotateX(Pitch) * Translate(0, 0, -Altitude)`
   This effectively "moves the world away" from the static camera.
 
+### Interaction: Ray Casting (The "Drift" Fix)
+When zooming in 2D, we simply unproject $(X, Y)$. In 3D (Pitched View), this fails because the distance from the camera to the "ground" varies across the screen.
+*   **The Problem**: A naive unprojection assumes a constant Z (depth).
+*   **The Solution**: **Ray-Plane Intersection**.
+    1.  Convert mouse $(X, Y)$ to a **Ray** in world space (Near Point $\rightarrow$ Far Point).
+    2.  Define the Map Plane as $Z = 0$.
+    3.  Calculate the exact intersection $T$ where the Ray hits the Plane.
+    4.  This gives the precise World Coordinate under the cursor, ensuring the map doesn't "slide" when zooming while tilted.
+

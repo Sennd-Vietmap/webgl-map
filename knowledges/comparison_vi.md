@@ -138,3 +138,12 @@ Chuyển từ bản đồ 2D sang 3D đòi hỏi Phép chiếu Phối cảnh (Pe
   `View = RotateZ(Bearing) * RotateX(Pitch) * Translate(0, 0, -Altitude)`
   Điều này thực chất là "di chuyển thế giới ra xa" khỏi camera tĩnh.
 
+### Tương tác: Ray Casting (Sửa lỗi "Trôi" Map)
+Khi zoom trong 2D, ta chỉ đơn giản là unproject $(X, Y)$. Trong 3D (khi camera nghiêng), cách này sai vì khoảng cách từ camera xuống "mặt đất" thay đổi tùy theo vị trí trên màn hình (gần thì thấp, xa thì cao).
+*   **Vấn đề**: Unproject ngây thơ giả định Z (độ sâu) là hằng số.
+*   **Giải pháp**: **Giao điểm Tia-Mặt phẳng (Ray-Plane Intersection)**.
+    1.  Chuyển đổi chuột $(X, Y)$ thành một **Tia (Ray)** trong không gian thế giới (Điểm Gần $\rightarrow$ Điểm Xa).
+    2.  Định nghĩa Mặt phẳng Bản đồ là $Z = 0$.
+    3.  Tính toán chính xác thời điểm $T$ mà Tia cắt Mặt phẳng.
+    4.  Điều này cho ta Tọa độ Thế giới chính xác ngay dưới con trỏ chuột, đảm bảo bản đồ không bị "trượt" đi khi zoom lúc đang nghiêng.
+
