@@ -222,6 +222,8 @@ Việc hiển thị bản đồ tiêu tốn nhiều CPU (phân tích/chia lướ
 - **Ngăn chặn yêu cầu lặp lại**: Duy trì trạng thái `IsLoading` trong bộ nhớ đệm. Nếu người dùng di chuyển bản đồ nhanh, điều này ngăn việc gửi 10 yêu cầu HTTP giống hệt nhau cho cùng một ô bản đồ trước khi yêu cầu đầu tiên kết thúc.
 - **Tải tài nguyên bất đồng bộ**: Các mô hình 3D có thể nặng vài MB. Hãy tải dữ liệu hình học trong nền và chỉ đẩy lên GPU (VAO/VBO) trên Main thread sau khi dữ liệu đã sẵn sàng.
 - **Vẽ theo yêu cầu (On-Demand Rendering)**: Tránh sử dụng vòng lặp `Application.Idle` vì nó ép máy tính vẽ 60fps ngay cả khi bản đồ đang đứng yên. Chỉ gọi `Invalidate` khi có tương tác (di chuyển/thu phóng) hoặc khi có dữ liệu mới về (`TileLoaded`).
-- **Tối ưu hóa cập nhật Viewport**: Việc tính toán "ô nào đang hiện" rất tốn kém. Hãy giới hạn tần suất (throttle) hoặc bỏ qua `UpdateViewport` khi đang di chuyển chuột quá nhanh để ưu tiên sự mượt mà khi di chuyển bằng dữ liệu đã có sẵn trong cache.
+- **Quản lý Viewport thông minh**:
+    - **Interaction Debouncing**: Trì hoãn việc gọi `UpdateViewport` khoảng 500ms sau khi người dùng ngừng tương tác. Điều này giúp trải nghiệm xoay/thu phóng mượt mà bằng cách sử dụng các ô có sẵn trong bộ nhớ đệm.
+    - **Phát hiện cạn kiệt (Exhaustion Detection)**: Nếu người dùng di chuyển vượt quá một ngưỡng (ví dụ: > 0.5 ô hoặc > 0.5 mức thu phóng), hãy ép buộc cập nhật ngay lập tức để ngăn việc xuất hiện khoảng trắng.
 
 
