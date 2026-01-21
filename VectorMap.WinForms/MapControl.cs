@@ -36,6 +36,7 @@ namespace VectorMap.WinForms
         private bool _modelLoaded = false;
         private bool _isModelLoading = false;
         private GLBModel? _pendingModel;
+        private DateTime _lastViewportUpdate = DateTime.MinValue;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -81,9 +82,9 @@ namespace VectorMap.WinForms
             // Start loading 3D model in background
             _ = LoadModelAsync();
 
-            // Re-render as fast as possible
-            Application.Idle += (s, args) => {
-                if (!IsDisposed && IsHandleCreated && !DesignMode) Invalidate();
+            // Invalidate whenever a tile is loaded in the background
+            _tileManager.TileLoaded += (coord, data) => {
+                if (!IsDisposed && IsHandleCreated) Invalidate();
             };
             
             _isInitialized = true;
@@ -121,8 +122,14 @@ namespace VectorMap.WinForms
             GL.ClearColor(Color.FromArgb(240, 240, 240));
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-            // Update Tiles
-            _tileManager.UpdateViewport(_camera.GetBounds(), (int)_camera.Zoom);
+            // Throttled Viewport Update (Avoid lag during expensive tile processing)
+            // Only update "what tiles are needed" every 100ms or when interaction stops
+            bool isMoving = _isDragging || _isRotating;
+            if (!isMoving || (DateTime.Now - _lastViewportUpdate).TotalMilliseconds > 150)
+            {
+                _tileManager.UpdateViewport(_camera.GetBounds(), (int)_camera.Zoom);
+                _lastViewportUpdate = DateTime.Now;
+            }
 
             // Render Map
             var tiles = _tileManager.GetRenderableTiles();
@@ -180,6 +187,7 @@ namespace VectorMap.WinForms
                 float dy = e.Y - _lastMousePos.Y;
                 _camera.Pan(-dx, dy, ClientSize.Width, ClientSize.Height);
                 _lastMousePos = e.Location;
+                Invalidate();
             }
             else if (_isRotating)
             {
@@ -188,6 +196,7 @@ namespace VectorMap.WinForms
                 _camera.Bearing += dx * 0.5f;
                 _camera.Pitch = Math.Clamp(_camera.Pitch + dy * 0.5f, 0, 85);
                 _lastMousePos = e.Location;
+                Invalidate();
             }
         }
 
@@ -196,6 +205,7 @@ namespace VectorMap.WinForms
             base.OnMouseWheel(e);
             float delta = e.Delta / 120.0f;
             _camera.ZoomAt(delta * 0.5f, e.X, e.Y, ClientSize.Width, ClientSize.Height);
+            Invalidate();
         }
         private async Task LoadModelAsync()
         {

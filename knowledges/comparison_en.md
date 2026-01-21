@@ -221,5 +221,7 @@ Map rendering is CPU-intensive (parsing/tessellating) and IO-intensive (fetching
 - **Offload Heavy Math**: Parsing MVTs and triangulating polygons should never happen on the UI thread. Use `await Task.Run(() => parser.Parse(data))` to keep the map panning smooth.
 - **Redundant Request Prevention**: Maintain an `IsLoading` state in your tile cache. If the user pans the map quickly, this prevents firing 10 duplicate HTTP requests for the same tile before the first one finishes.
 - **Async Asset Loading**: 3D models can be several megabytes. Load the geometry in the background and only upload to the GPU (VAO/VBO) on the Main thread once the data is ready.
+- **On-Demand Rendering**: Avoid `Application.Idle` loops that force 60fps even when static. Invalidate the control only during interactions (move/zoom) or when new data arrives (`TileLoaded` event).
+- **Throttled Viewport Management**: Calculating "tiles in view" is expensive. Skip or throttle `UpdateViewport` during rapid dragging to prioritize smooth panning using cached data.
 
 
