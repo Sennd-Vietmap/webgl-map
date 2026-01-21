@@ -23,6 +23,13 @@ This document preserves critical architectural decisions, "lessons learned," and
 - **Rotation/Pitch Resilience**: By using `ScreenToWorld` projection, panning remains 100% accurate even when the map is rotated (Bearing) or tilted (Pitch).
 - **Inertia**: Implemented a velocity-based momentum system. On mouse release, the map continues to "slide" using recorded mouse velocity and simulated friction.
 
+### Label Rendering & Collision Detection
+- **Mechanism**: Labels (like `housenumber` and `name`) are extracted during MVT parsing and stored as `LabelInfo` with global Mercator coordinates.
+- **Font Atlas**: A dynamic texture atlas is generated on-the-fly using `System.Drawing`. It captures glyph metrics (UVs, width, height) to allow batch rendering of text quads.
+- **Collision Avoidance (AABB)**: To prevent map clutter, a **Spatial Collision Grid** (implemented via AABB list) checks each label's bounding box against already-placed labels on the screen.
+- **Priority System**: Labels are rendered in order of priority (e.g., house numbers > park names) so that more important information is never hidden by less important labels.
+- **Performance**: Text is batched into a single primitive stream and rendered using an **Orthographic Projection** overlay, keeping labels crisp regardless of camera pitch.
+
 ## 4. OpenGL Resource Management
 - **VBO/EBO Strategy**: Use `BufferUsageHint.StreamDraw` for batch buffers. These are cleared and refilled every frame during interaction.
 - **VAO State**: A single VAO is used for the map, managing the binding of both the VBO (vertices) and EBO (indices).

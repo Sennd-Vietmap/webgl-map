@@ -142,16 +142,11 @@ public class TileManager
             var response = await _httpClient.GetByteArrayAsync(url).ConfigureAwait(false);
             
             // 2. Parse data (CPU-bound) - Offload to background thread to avoid locking UI
-            var featureSets = await Task.Run(() => _parser.Parse(response, tile)).ConfigureAwait(false);
+            var tileData = await Task.Run(() => _parser.Parse(response, tile)).ConfigureAwait(false);
             
-            var tileData = new TileData
-            {
-                Coordinate = tile,
-                FeatureSets = featureSets,
-                IsLoaded = true,
-                IsLoading = false,
-                LoadedAt = DateTime.UtcNow
-            };
+            tileData.IsLoaded = true;
+            tileData.IsLoading = false;
+            tileData.LoadedAt = DateTime.UtcNow;
             
             lock (_cacheLock)
             {

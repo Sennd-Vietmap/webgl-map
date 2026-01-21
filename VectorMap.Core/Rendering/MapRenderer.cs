@@ -21,6 +21,7 @@ public class MapRenderer : IDisposable
     
     private readonly Dictionary<string, Color4> _layerColors;
     private bool _isInitialized;
+    private LabelRenderer? _labelRenderer;
     
     public MapRenderer(Dictionary<string, Color4>? layerColors = null)
     {
@@ -90,6 +91,7 @@ public class MapRenderer : IDisposable
         
         GL.BindVertexArray(0);
         
+        _labelRenderer = new LabelRenderer();
         _isInitialized = true;
     }
     
@@ -174,6 +176,13 @@ public class MapRenderer : IDisposable
 
         GL.BindVertexArray(0);
         GL.UseProgram(0);
+
+        // 4. Render Labels on top
+        if (_labelRenderer != null)
+        {
+            _labelRenderer.Render(camera, tiles);
+        }
+
         GL.Enable(EnableCap.DepthTest);
         GL.DepthFunc(DepthFunction.Less);
     }
@@ -320,6 +329,7 @@ void main()
             GL.DeleteBuffer(_vbo);
             GL.DeleteBuffer(_ebo);
             GL.DeleteProgram(_shaderProgram);
+            _labelRenderer?.Dispose();
             _isInitialized = false;
         }
     }

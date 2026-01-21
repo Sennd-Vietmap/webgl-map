@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using VectorMap.Core.Geometry;
+using VectorMap.Core.Projection;
 
 namespace VectorMap.Core.Tiles;
 
@@ -19,9 +20,9 @@ public class VectorTileParser
     /// <summary>
     /// Parse a vector tile from PBF data
     /// </summary>
-    public List<FeatureSet> Parse(byte[] data, TileCoordinate tile)
+    public TileData Parse(byte[] data, TileCoordinate tile)
     {
-        var result = new List<FeatureSet>();
+        var tileData = new TileData { Coordinate = tile };
         
         try
         {
@@ -43,7 +44,7 @@ public class VectorTileParser
                     var bytes = reader.ReadBytes();
                     if (bytes.Length > 0)
                     {
-                        ParseLayer(bytes, tile, layerDataMap);
+                        ParseLayer(bytes, tile, layerDataMap, tileData.Labels);
                     }
                 }
                 else
@@ -52,14 +53,14 @@ public class VectorTileParser
                 }
             }
             
-            // Convert to FeatureSet list
+            // Convert collected geometry to FeatureSet list
             foreach (var layer in layerDataMap)
             {
                 foreach (var typeData in layer.Value)
                 {
                     if (typeData.Value.V.Count > 0)
                     {
-                        result.Add(new FeatureSet
+                        tileData.FeatureSets.Add(new FeatureSet
                         {
                             Coordinate = tile,
                             LayerName = layer.Key,
@@ -76,11 +77,12 @@ public class VectorTileParser
             Console.WriteLine($"Warning: Error parsing tile {tile}: {ex.Message}");
         }
         
-        return result;
+        return tileData;
     }
     
     private void ParseLayer(byte[] data, TileCoordinate tile, 
-        Dictionary<string, Dictionary<GeometryType, (List<float> V, List<uint> I)>> layerData)
+        Dictionary<string, Dictionary<GeometryType, (List<float> V, List<uint> I)>> layerData,
+        List<LabelInfo> labels)
     {
         var reader = new PbfReader(data);
         
@@ -130,21 +132,29 @@ public class VectorTileParser
         
         foreach (var featureData in features)
         {
-            ParseFeature(featureData, tile, extent, layerData[layerName]);
+            ParseFeature(featureData, tile, extent, layerData[layerName], keys, values, labels, layerName);
         }
     }
     
     private void ParseFeature(byte[] data, TileCoordinate tile, int extent,
-        Dictionary<GeometryType, (List<float> V, List<uint> I)> layerStorage)
+        Dictionary<GeometryType, (List<float> V, List<uint> I)> layerStorage,
+        List<string> keys, List<object> values, List<LabelInfo> labels, string layerName)
     {
         var reader = new PbfReader(data);
         GeometryType type = GeometryType.Unknown;
         byte[]? geometryData = null;
+        var tags = new List<uint>();
         
         while (reader.NextField())
         {
             switch (reader.Tag)
             {
+                case 2: // tags
+                    var tagBytes = reader.ReadBytes();
+                    var tagReader = new PbfReader(tagBytes);
+                    while (tagReader.Remaining > 0)
+                        tags.Add((uint)tagReader.ReadRawVarint());
+                    break;
                 case 3: // type
                     type = (GeometryType)reader.ReadVarint();
                     break;
@@ -159,9 +169,39 @@ public class VectorTileParser
         
         if (geometryData == null || type == GeometryType.Unknown)
             return;
+
+        // Extract properties for labels
+        string labelText = string.Empty;
+        for (int i = 0; i + 1 < tags.Count; i += 2)
+        {
+            uint kIdx = tags[i];
+            uint vIdx = tags[i+1];
+            if (kIdx < keys.Count && vIdx < values.Count)
+            {
+                if (keys[(int)kIdx] == "housenumber" || keys[(int)kIdx] == "name")
+                {
+                    labelText = values[(int)vIdx].ToString() ?? string.Empty;
+                }
+            }
+        }
             
         var coords = DecodeGeometry(geometryData, type, tile, extent);
         var (vList, iList) = layerStorage[type];
+
+        // If we found a label, add it to the tile's labels
+        if (!string.IsNullOrEmpty(labelText) && coords.Count > 0 && coords[0].Length > 0)
+        {
+            var firstPt = coords[0][0];
+            var (mercX, mercY) = MercatorCoordinate.FromLngLat(firstPt[0], firstPt[1]);
+            labels.Add(new LabelInfo 
+            { 
+                Text = labelText, 
+                X = mercX, 
+                Y = mercY, 
+                LayerName = layerName,
+                Priority = layerName == "housenumber" ? 10.0f : 5.0f
+            });
+        }
 
         switch (type)
         {

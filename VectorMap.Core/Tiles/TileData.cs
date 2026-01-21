@@ -7,9 +7,22 @@ public class TileData
 {
     public TileCoordinate Coordinate { get; set; }
     public List<FeatureSet> FeatureSets { get; set; } = new();
+    public List<LabelInfo> Labels { get; set; } = new();
     public bool IsLoaded { get; set; }
     public bool IsLoading { get; set; }
     public DateTime LoadedAt { get; set; }
+}
+
+/// <summary>
+/// Information for a text label
+/// </summary>
+public class LabelInfo
+{
+    public string Text { get; set; } = string.Empty;
+    public double X { get; set; } // Global Mercator
+    public double Y { get; set; } // Global Mercator
+    public string LayerName { get; set; } = string.Empty;
+    public float Priority { get; set; } = 0.0f;
 }
 
 /// <summary>
