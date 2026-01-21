@@ -195,6 +195,31 @@ Nếu bạn render từng tile một theo thứ tự, một tòa nhà ở Tile A
 ### Làm mịn cạnh (MSAA)
 Để loại bỏ hiện tượng răng cưa (aliasing) trên các cạnh tòa nhà:
 - Khởi tạo `GLControl` với `GLControlSettings { NumberOfSamples = 4 }`.
-- Bật `EnableCap.Multisample` ở phía GPU.
+## 9. Tích hợp Mô hình 3D & Độ chân thực
+Việc hiển thị các mô hình 3D (GLB) trên bản đồ 2D đòi hỏi phải thu hẹp khoảng cách giữa tọa độ địa lý và không gian 3D cục bộ.
+
+### Định vị 3D theo quy mô thế giới
+Trong thế giới Web Mercator (0..1), 1 đơn vị đại diện cho khoảng 40 triệu mét.
+- **Vấn đề**: Một mô hình 3D cao 1 mét sẽ không thể nhìn thấy được (1/40.000.000 của thế giới).
+- **Giải pháp**: Tính toán một tỷ lệ (scale) cục bộ dựa trên **Cosin của Vĩ độ**.
+    - `scale = scaleMeters / (EarthCircumference * cos(latitude))`.
+    - Điều này đảm bảo một ngôi nhà giữ nguyên kích thước vật lý dù nó ở New York hay London.
+
+### Đạt được độ chân thực (Phương pháp PBR Lite)
+Để làm cho các mô hình 3D trông "thật" hơn và thoát khỏi việc đổ màu phẳng:
+1. **Ánh sáng Blinn-Phong**: Thêm các điểm phản xạ (Specular highlights). Bằng cách theo dõi `uViewPos` (Vị trí Camera), sự phản chiếu của mô hình sẽ thay đổi tự nhiên khi người dùng xoay bản đồ.
+2. **Hiệu chỉnh sRGB Gamma**: Hầu hết các mô hình GLB được tạo ra trong không gian màu sRGB. Nếu bạn hiển thị trực tiếp, chúng sẽ trông "cháy" hoặc quá tối.
+    - **Quy tắc**: Chuyển đổi màu sắc sang không gian Tuyến tính (`pow(color, 2.2)`), tính toán ánh sáng, sau đó chuyển ngược lại sRGB (`pow(lighting, 1.0/2.2)`) trước khi xuất ra màn hình.
+3. **Depth Buffering (Bộ đệm độ sâu)**: Bản đồ thường là 2.5D. Khi thêm mô hình 3D thực thụ, hãy đảm bảo `GL.Enable(EnableCap.DepthTest)` chỉ được bật cho lượt vẽ 3D để tránh mô hình bị "nuốt" bởi mặt đất (hoặc sử dụng một độ lệch Z cực nhỏ).
+
+---
+
+## 10. Hiệu năng & Kiến trúc Bất đồng bộ (Async)
+Việc hiển thị bản đồ tiêu tốn nhiều CPU (phân tích/chia lưới) và IO (tải các ô bản đồ).
+
+### Ngăn chặn hiện tượng treo UI
+- **Chuyển các tính toán nặng ra ngoài**: Việc phân tích MVT và triangulation các đa giác không bao giờ được diễn ra trên UI thread. Sử dụng `await Task.Run(() => parser.Parse(data))` để giữ cho việc di chuyển bản đồ luôn mượt mà.
+- **Ngăn chặn yêu cầu lặp lại**: Duy trì trạng thái `IsLoading` trong bộ nhớ đệm. Nếu người dùng di chuyển bản đồ nhanh, điều này ngăn việc gửi 10 yêu cầu HTTP giống hệt nhau cho cùng một ô bản đồ trước khi yêu cầu đầu tiên kết thúc.
+- **Tải tài nguyên bất đồng bộ**: Các mô hình 3D có thể nặng vài MB. Hãy tải dữ liệu hình học trong nền và chỉ đẩy lên GPU (VAO/VBO) trên Main thread sau khi dữ liệu đã sẵn sàng.
 
 

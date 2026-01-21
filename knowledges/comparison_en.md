@@ -195,6 +195,31 @@ If you render tiles one-by-one, a building in Tile A might be drawn *before* the
 ### Edge Smoothing (MSAA)
 To remove "staircase" aliasing on building edges:
 - Initialize `GLControl` with `GLControlSettings { NumberOfSamples = 4 }`.
-- Enable `EnableCap.Multisample` on the GPU side.
+## 9. 3D Model Integration & Realism
+Rendering 3D models (GLB) on a 2D map requires bridging the gap between geographic coordinates and local 3D space.
+
+### World-Scale 3D Positioning
+In a Web Mercator world (0..1), 1 unit represents ~40 million meters.
+- **The Problem**: A 1-meter 3D model would be invisible (1/40,000,000 of the world).
+- **The Fix**: Calculate a local scale factor based on the **Cosine of the Latitude**. 
+    - `scale = scaleMeters / (EarthCircumference * cos(latitude))`.
+    - This ensures a house stays the same physical size whether it's in New York or London.
+
+### Achieving Visual Realism (The PBR Lite Approach)
+To make 3D models look "real" and move away from flat coloring:
+1. **Blinn-Phong Lighting**: Add Specular highlights. By tracking the `uViewPos` (Camera position), the model's reflections shift naturally as the user rotates the map.
+2. **sRGB Gamma Correction**: Most GLB models are authored in sRGB space. If you render them directly, they look "burnt" or "dark."
+    - **Rule**: Convert `vColor` to Linear space (`pow(color, 2.2)`), calculate lighting, then convert back to sRGB (`pow(lighting, 1.0/2.2)`) before output.
+3. **Depth Buffering**: Maps are usually 2.5D. When adding true 3D models, ensure `GL.Enable(EnableCap.DepthTest)` is toggled only for the 3D pass to prevent the model from getting "eaten" by the ground plane (or use a tiny Z-offset).
+
+---
+
+## 10. Performance & Async Architecture
+Map rendering is CPU-intensive (parsing/tessellating) and IO-intensive (fetching tiles).
+
+### Preventing UI Freezes
+- **Offload Heavy Math**: Parsing MVTs and triangulating polygons should never happen on the UI thread. Use `await Task.Run(() => parser.Parse(data))` to keep the map panning smooth.
+- **Redundant Request Prevention**: Maintain an `IsLoading` state in your tile cache. If the user pans the map quickly, this prevents firing 10 duplicate HTTP requests for the same tile before the first one finishes.
+- **Async Asset Loading**: 3D models can be several megabytes. Load the geometry in the background and only upload to the GPU (VAO/VBO) on the Main thread once the data is ready.
 
 
