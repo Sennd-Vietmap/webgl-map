@@ -39,6 +39,7 @@ namespace VectorMap.WinForms
         private DateTime _lastViewportUpdate = DateTime.MinValue;
         private System.Windows.Forms.Timer _debounceTimer;
         private double _lastUpdateX, _lastUpdateY, _lastUpdateZoom, _lastUpdateBearing, _lastUpdatePitch;
+        private Label _infoLabel;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -90,6 +91,18 @@ namespace VectorMap.WinForms
             };
             
             _isInitialized = true;
+
+            // Info Label
+            _infoLabel = new Label
+            {
+                AutoSize = true,
+                BackColor = Color.FromArgb(180, Color.White),
+                ForeColor = Color.Black,
+                Location = new Point(10, 10),
+                Font = new Font("Consolas", 10, FontStyle.Bold),
+                Padding = new Padding(5)
+            };
+            this.Controls.Add(_infoLabel);
 
             // Debounce timer for viewport updates (500ms delay after interaction stops)
             _debounceTimer = new System.Windows.Forms.Timer();
@@ -179,6 +192,9 @@ namespace VectorMap.WinForms
             }
 
             _modelRenderer.Render(_camera, _modelPosition, 50.0f); // 50 meters wide
+
+            // Update Info UI
+            _infoLabel.Text = $"Zoom: {_camera.Zoom:F2}\nLat:  {_camera.Lat:F6}\nLng:  {_camera.Lng:F6}";
 
             // FPS Counter
             _frameCount++;

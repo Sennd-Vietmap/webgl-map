@@ -17,6 +17,7 @@ public class TileData
 /// </summary>
 public class FeatureSet
 {
+    public TileCoordinate Coordinate { get; set; } // The tile this feature set belongs to
     public string LayerName { get; set; } = string.Empty;
     public GeometryType Type { get; set; }
     public float[] Vertices { get; set; } = Array.Empty<float>();

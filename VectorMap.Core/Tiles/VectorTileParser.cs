@@ -61,6 +61,7 @@ public class VectorTileParser
                     {
                         result.Add(new FeatureSet
                         {
+                            Coordinate = tile, // Track parent tile
                             LayerName = layer.Key,
                             Type = typeVertices.Key,
                             Vertices = typeVertices.Value.ToArray()
@@ -234,8 +235,8 @@ public class VectorTileParser
                     cursorX += dx;
                     cursorY += dy;
                     
-                    // Convert tile coordinates to lat/lng
-                    var (lng, lat) = TileToLngLat(cursorX, cursorY, tile, extent);
+                    // Convert raw tile integer coordinates to normalized 0..1 range
+                    var (nx, ny) = TileToNormalized(cursorX, cursorY, extent);
                     
                     if (cmd == 1) // MoveTo - start new ring
                     {
@@ -246,7 +247,7 @@ public class VectorTileParser
                         }
                     }
                     
-                    currentRing.Add(new[] { lng, lat });
+                    currentRing.Add(new[] { nx, ny });
                 }
                 else if (cmd == 7) // ClosePath
                 {
@@ -267,13 +268,11 @@ public class VectorTileParser
         return rings;
     }
     
-    private static (double lng, double lat) TileToLngLat(int x, int y, TileCoordinate tile, int extent)
+    private static (double nx, double ny) TileToNormalized(int x, int y, int extent)
     {
-        int n = 1 << tile.Z;
-        double lng = (tile.X + (double)x / extent) / n * 360.0 - 180.0;
-        double latRad = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * (tile.Y + (double)y / extent) / n)));
-        double lat = latRad * 180.0 / Math.PI;
-        return (lng, lat);
+        // Simply normalize the coordinate relative to the tile extent (usually 4096)
+        // This is extremely precise as it uses the raw integer offsets
+        return ((double)x / extent, (double)y / extent);
     }
     
     private static int ZigZagDecode(uint n)

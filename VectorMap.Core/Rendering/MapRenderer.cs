@@ -131,42 +131,57 @@ public class MapRenderer : IDisposable
         GL.Uniform1(_scaleLocation, 1.0f);
         GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
         
-        // 1. Group all feature sets by layer across all tiles for batching
-        var layerGroups = new Dictionary<string, List<FeatureSet>>();
+        // Render Tile-by-Tile to maintain high precision
         foreach (var tile in tiles)
         {
-            foreach (var featureSet in tile.FeatureSets)
+            // Compute a high-precision Tile-to-Clip matrix
+            // This subtraction is done in DOUBLE to avoid jitter
+            double worldSize = 512 * Math.Pow(2, camera.Zoom);
+            double tileScale = 1.0 / Math.Pow(2, tile.Z);
+            
+            // Relative position of tile origin from camera center
+            double relX = (tile.X - camera.X * Math.Pow(2, tile.Z)) * tileScale;
+            double relY = (tile.Y - camera.Y * Math.Pow(2, tile.Z)) * tileScale;
+            
+            // Base matrix for this tile: local (0..1) -> world-relative -> clip
+            // We reuse the Camera's View and Projection but replace the World translation
+            Matrix4d tileMatrix = Matrix4d.CreateScale(tileScale * worldSize, -tileScale * worldSize, 1.0);
+            tileMatrix *= Matrix4d.CreateTranslation((tile.X * tileScale - camera.X) * worldSize, (camera.Y - tile.Y * tileScale) * worldSize, 0);
+            tileMatrix *= Matrix4d.CreateRotationZ(MathHelper.DegreesToRadians(camera.Bearing));
+            tileMatrix *= Matrix4d.CreateRotationX(MathHelper.DegreesToRadians(-camera.Pitch));
+            
+            // Perspective / View Altitude part
+            double fovVal = MathHelper.DegreesToRadians(60.0);
+            double altitude = (camera.ViewportHeight / 2.0 / Math.Tan(fovVal / 2.0));
+            tileMatrix *= Matrix4d.CreateTranslation(0, 0, -altitude);
+            tileMatrix *= Matrix4d.CreatePerspectiveFieldOfView(fovVal, (double)camera.ViewportWidth / camera.ViewportHeight, 0.1, altitude * 100.0);
+
+            Matrix4 floatMatrix = new Matrix4(
+                (float)tileMatrix.Row0.X, (float)tileMatrix.Row0.Y, (float)tileMatrix.Row0.Z, (float)tileMatrix.Row0.W,
+                (float)tileMatrix.Row1.X, (float)tileMatrix.Row1.Y, (float)tileMatrix.Row1.Z, (float)tileMatrix.Row1.W,
+                (float)tileMatrix.Row2.X, (float)tileMatrix.Row2.Y, (float)tileMatrix.Row2.Z, (float)tileMatrix.Row2.W,
+                (float)tileMatrix.Row3.X, (float)tileMatrix.Row3.Y, (float)tileMatrix.Row3.Z, (float)tileMatrix.Row3.W
+            );
+
+            GL.UniformMatrix4(_matrixLocation, false, ref floatMatrix);
+            GL.Uniform1(_scaleLocation, 1.0f);
+            GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
+
+            // Group features by layer WITHIN the tile
+            var layerGroups = tile.FeatureSets.GroupBy(f => f.LayerName);
+            float currentDepth = 0.0f;
+            const float depthStep = 0.000001f;
+
+            foreach (var orderLayer in GlobalLayerOrder)
             {
-                if (!layerGroups.TryGetValue(featureSet.LayerName, out var list))
+                var group = layerGroups.FirstOrDefault(g => g.Key == orderLayer);
+                if (group != null)
                 {
-                    list = new List<FeatureSet>();
-                    layerGroups[featureSet.LayerName] = list;
+                    GL.Uniform1(_depthLocation, currentDepth);
+                    RenderGroup(group.ToList(), disabledLayers);
+                    currentDepth += depthStep;
                 }
-                list.Add(featureSet);
             }
-        }
-
-        // 2. Render layers in the predefined order
-        float currentDepth = 0.0f;
-        const float depthStep = 0.000001f;
-
-        foreach (var layerName in GlobalLayerOrder)
-        {
-            if (layerGroups.TryGetValue(layerName, out var group))
-            {
-                GL.Uniform1(_depthLocation, currentDepth);
-                RenderGroup(group, disabledLayers);
-                layerGroups.Remove(layerName);
-                currentDepth += depthStep;
-            }
-        }
-
-        // 3. Render any remaining layers (unrecognized)
-        foreach (var group in layerGroups.Values)
-        {
-            GL.Uniform1(_depthLocation, currentDepth);
-            RenderGroup(group, disabledLayers);
-            currentDepth += depthStep;
         }
         
         GL.BindVertexArray(0);
