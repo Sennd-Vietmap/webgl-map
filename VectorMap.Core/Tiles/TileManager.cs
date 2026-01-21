@@ -120,19 +120,6 @@ public class TileManager
             var response = await _httpClient.GetByteArrayAsync(url);
             var featureSets = _parser.Parse(response, tile);
             
-            // Debug: Log how many features were parsed and first vertex values
-            int totalVertices = featureSets.Sum(fs => fs.Vertices.Length);
-            if (totalVertices > 0)
-            {
-                Console.WriteLine($"Loaded tile {key}: {featureSets.Count} feature sets, {totalVertices} vertices");
-                // Print first few vertex values to debug
-                var firstSet = featureSets.FirstOrDefault(fs => fs.Vertices.Length >= 6);
-                if (firstSet != null)
-                {
-                    Console.WriteLine($"  First vertices: [{firstSet.Vertices[0]:F4}, {firstSet.Vertices[1]:F4}], [{firstSet.Vertices[2]:F4}, {firstSet.Vertices[3]:F4}], [{firstSet.Vertices[4]:F4}, {firstSet.Vertices[5]:F4}]");
-                }
-            }
-            
             var tileData = new TileData
             {
                 Coordinate = tile,

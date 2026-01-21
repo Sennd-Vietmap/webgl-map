@@ -227,7 +227,7 @@ public class VectorTileParser
             {
                 if (cmd == 1 || cmd == 2) // MoveTo or LineTo
                 {
-                    if (i + 1 >= values.Count) break;
+                    if (i + 2 > values.Count) break; // Need 2 values (dx, dy)
                     
                     int dx = ZigZagDecode(values[i++]);
                     int dy = ZigZagDecode(values[i++]);

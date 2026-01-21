@@ -25,6 +25,7 @@ public static class GeometryConverter
                 var (x, y) = MercatorCoordinate.FromLngLat(coord[0], coord[1]);
                 contour[i] = new ContourVertex { Position = new Vec3 { X = (float)x, Y = (float)y, Z = 0 } };
             }
+            
             tess.AddContour(contour);
         }
         

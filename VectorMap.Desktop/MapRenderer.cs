@@ -96,12 +96,8 @@ public class MapRenderer : IDisposable
         GL.UseProgram(_shaderProgram);
         GL.BindVertexArray(_vao);
         
-        // DEBUG: Render a test triangle with identity matrix to verify pipeline works
-        RenderDebugTriangle();
-        
-        // Set matrix uniform - DEBUG: Use identity matrix to test if tiles render at all
-        // Matrix4 matrix = camera.GetViewProjectionMatrix();
-        Matrix4 matrix = Matrix4.Identity;
+        // Set matrix uniform - use camera's view projection matrix
+        Matrix4 matrix = camera.GetViewProjectionMatrix();
         GL.UniformMatrix4(_matrixLocation, false, ref matrix);
         
         // Render each tile
@@ -162,12 +158,12 @@ public class MapRenderer : IDisposable
         // Bright red color
         GL.Uniform4(_colorLocation, 1.0f, 0.0f, 0.0f, 1.0f);
         
-        // Triangle vertices in clip space (-1 to 1)
+        // Triangle vertices at the tile location (Brooklyn ~-0.41, 0.25)
         float[] vertices = new float[]
         {
-            -0.5f, -0.5f,   // bottom left
-             0.5f, -0.5f,   // bottom right
-             0.0f,  0.5f    // top center
+            -0.45f, 0.20f,   // bottom left
+            -0.35f, 0.20f,   // bottom right
+            -0.40f, 0.30f    // top center
         };
         
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);

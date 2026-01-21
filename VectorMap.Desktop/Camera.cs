@@ -41,13 +41,15 @@ public class Camera
         float scaleX = (float)(zoomScale / widthScale);
         float scaleY = (float)(zoomScale / heightScale);
         
-        // Build camera matrix matching JS: mat3.translate then mat3.scale
-        // In OpenTK: Matrix4.CreateScale * Matrix4.CreateTranslation (reverse order)
-        var cameraMat = Matrix4.CreateScale(scaleX, scaleY, 1f) * 
-                        Matrix4.CreateTranslation((float)X, (float)Y, 0);
+        // The camera matrix in JS is built as: mat3.translate then mat3.scale
+        // In gl-matrix, this means: result = translate * scale (scale applied first)
+        // The view matrix is the inverse of the camera matrix
+        // 
+        // Camera matrix: first scale, then translate to camera position
+        // View matrix (inverse): first translate by -camera position, then scale by inverse
         
-        // Invert to get view matrix
-        var viewMat = Matrix4.Invert(cameraMat);
+        var viewMat = Matrix4.CreateTranslation(-(float)X, -(float)Y, 0) *
+                      Matrix4.CreateScale(1f / scaleX, 1f / scaleY, 1f);
         
         return viewMat;
     }
