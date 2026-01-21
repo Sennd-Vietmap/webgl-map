@@ -110,7 +110,8 @@ public class Camera
         // We rotate the WORLD, not the camera.
         Matrix4 view = Matrix4.Identity;
         view *= Matrix4.CreateRotationZ(MathHelper.DegreesToRadians((float)Bearing));
-        view *= Matrix4.CreateRotationX(MathHelper.DegreesToRadians((float)Pitch));
+        // Invert Pitch to make the top of the map go "back" into negative Z (Perspective depth)
+        view *= Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-(float)Pitch));
         view *= Matrix4.CreateTranslation(0, 0, -altitude); // Move world back from camera
         
         // 3b. Model Transformation (Coordinate -> WorldPixels centered at 0,0)

@@ -233,8 +233,8 @@ public class MapWindow : GameWindow
             // Pitch (Y delta)
             _camera.Pitch += deltaY * 0.5f;
             
-            // Clamp Pitch to 0-60 degrees
-            _camera.Pitch = Math.Max(0, Math.Min(60, _camera.Pitch));
+            // Clamp Pitch to 0-85 degrees (Horizon view)
+            _camera.Pitch = Math.Max(0, Math.Min(85, _camera.Pitch));
             
             UpdateTiles();
             _lastMousePos = MousePosition;
