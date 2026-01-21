@@ -116,12 +116,20 @@ public class TileManager
     {
         string key = tile.ToKey();
         
-        // Mark as loading
-        _tileCache[key] = new TileData
+        lock (_cacheLock)
         {
-            Coordinate = tile,
-            IsLoaded = false
-        };
+            // If already loaded or currently loading, skip
+            if (_tileCache.TryGetValue(key, out var existing) && (existing.IsLoaded || existing.IsLoading))
+                return;
+
+            // Mark as loading to prevent redundant requests
+            _tileCache[key] = new TileData
+            {
+                Coordinate = tile,
+                IsLoaded = false,
+                IsLoading = true
+            };
+        }
         
         try
         {
@@ -130,14 +138,18 @@ public class TileManager
                 .Replace("{y}", tile.Y.ToString())
                 .Replace("{z}", tile.Z.ToString());
                 
-            var response = await _httpClient.GetByteArrayAsync(url);
-            var featureSets = _parser.Parse(response, tile);
+            // 1. Fetch data (IO-bound)
+            var response = await _httpClient.GetByteArrayAsync(url).ConfigureAwait(false);
+            
+            // 2. Parse data (CPU-bound) - Offload to background thread to avoid locking UI
+            var featureSets = await Task.Run(() => _parser.Parse(response, tile)).ConfigureAwait(false);
             
             var tileData = new TileData
             {
                 Coordinate = tile,
                 FeatureSets = featureSets,
                 IsLoaded = true,
+                IsLoading = false,
                 LoadedAt = DateTime.UtcNow
             };
             
@@ -145,12 +157,16 @@ public class TileManager
             {
                 _tileCache[key] = tileData;
             }
+            
             TileLoaded?.Invoke(tile, tileData);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Failed to load tile {key}: {ex.Message}");
-            _tileCache.Remove(key);
+            lock (_cacheLock)
+            {
+                _tileCache.Remove(key);
+            }
         }
     }
     

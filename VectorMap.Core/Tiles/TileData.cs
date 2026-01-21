@@ -8,6 +8,7 @@ public class TileData
     public TileCoordinate Coordinate { get; set; }
     public List<FeatureSet> FeatureSets { get; set; } = new();
     public bool IsLoaded { get; set; }
+    public bool IsLoading { get; set; }
     public DateTime LoadedAt { get; set; }
 }
 

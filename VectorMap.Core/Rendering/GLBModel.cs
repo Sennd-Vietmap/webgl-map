@@ -18,6 +18,11 @@ public class GLBModel
 {
     public List<ModelMesh> Meshes { get; } = new();
 
+    public static async Task<GLBModel> LoadAsync(string path)
+    {
+        return await Task.Run(() => Load(path));
+    }
+
     public static GLBModel Load(string path)
     {
         var model = new GLBModel();

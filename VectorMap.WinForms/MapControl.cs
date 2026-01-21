@@ -34,6 +34,8 @@ namespace VectorMap.WinForms
         private long _lastFpsUpdate;
         private bool _isInitialized = false;
         private bool _modelLoaded = false;
+        private bool _isModelLoading = false;
+        private GLBModel? _pendingModel;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -75,6 +77,9 @@ namespace VectorMap.WinForms
             _modelPosition = new Vector3((float)merc.x, (float)merc.y, 0.000005f); // Slightly above ground
             
             _stopwatch.Start();
+
+            // Start loading 3D model in background
+            _ = LoadModelAsync();
 
             // Re-render as fast as possible
             Application.Idle += (s, args) => {
@@ -123,21 +128,16 @@ namespace VectorMap.WinForms
             var tiles = _tileManager.GetRenderableTiles();
             _renderer.Render(_camera, tiles, new HashSet<string>());
 
-            // Render 3D Model (Demo)
-            // Try to load GLB if exists, otherwise use Cube
-            if (!_modelLoaded) {
-                try {
-                    //string glbPath = "VectorMap.Core/Assets/Models/box.glb";
-                    string glbPath = "D:\\RepoVietmap\\maps-api-group\\traning\\webgl-map\\VectorMapOpenTK\\VectorMap.Core\\Assets\\Models\\box.glb";
-                    if (System.IO.File.Exists(glbPath)) {
-                        _modelRenderer.LoadModel(GLBModel.Load(glbPath));
-                    } else {
-                        _modelRenderer.LoadModel(GLBModel.CreateCube());
-                    }
-                } catch {
-                    _modelRenderer.LoadModel(GLBModel.CreateCube());
+            // Handle 3D Model logic
+            if (!_modelLoaded) 
+            {
+                if (_pendingModel != null)
+                {
+                    // Upload to GPU (must be on GL thread)
+                    _modelRenderer.LoadModel(_pendingModel);
+                    _pendingModel = null;
+                    _modelLoaded = true;
                 }
-                _modelLoaded = true;
             }
 
             _modelRenderer.Render(_camera, _modelPosition, 50.0f); // 50 meters wide
@@ -196,6 +196,32 @@ namespace VectorMap.WinForms
             base.OnMouseWheel(e);
             float delta = e.Delta / 120.0f;
             _camera.ZoomAt(delta * 0.5f, e.X, e.Y, ClientSize.Width, ClientSize.Height);
+        }
+        private async Task LoadModelAsync()
+        {
+            if (_isModelLoading) return;
+            _isModelLoading = true;
+
+            try 
+            {
+                string glbPath = "D:\\RepoVietmap\\maps-api-group\\traning\\webgl-map\\VectorMapOpenTK\\VectorMap.Core\\Assets\\Models\\box.glb";
+                if (System.IO.File.Exists(glbPath)) 
+                {
+                    _pendingModel = await GLBModel.LoadAsync(glbPath);
+                } 
+                else 
+                {
+                    _pendingModel = GLBModel.CreateCube();
+                }
+            } 
+            catch 
+            {
+                _pendingModel = GLBModel.CreateCube();
+            }
+            finally
+            {
+                _isModelLoading = false;
+            }
         }
     }
 }
