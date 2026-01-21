@@ -64,8 +64,8 @@ public class MapWindow : GameWindow
             _options.CenterLng,
             _options.CenterLat,
             _options.Zoom,
-            Size.X,
-            Size.Y
+            ClientSize.X,
+            ClientSize.Y
         )
         {
             MinZoom = _options.MinZoom,
@@ -129,15 +129,14 @@ public class MapWindow : GameWindow
                 
                 // Mouse Coordinates & Round Trip Logic
                 var mouse = MousePosition;
-                var (wx, wy) = _camera.ScreenToWorld(mouse.X, mouse.Y, Size.X, Size.Y);
+                var (wx, wy) = _camera.ScreenToWorld(mouse.X, mouse.Y, ClientSize.X, ClientSize.Y);
                 var mLat = MercatorCoordinate.LatFromMercatorY(wy);
                 var mLng = MercatorCoordinate.LngFromMercatorX(wx);
                 ImGui.Text($"Mouse: {mLng:F5}, {mLat:F5}");
                 
                 // Debug: Round Trip
                 var (sx, sy) = _camera.WorldToScreen(wx, wy);
-                float dist = new Vector2((float)sx, (float)sy).Length - new Vector2(mouse.X, mouse.Y).Length;
-                dist = (new Vector2((float)sx - mouse.X, (float)sy - mouse.Y)).Length;
+                float dist = (new Vector2((float)sx - mouse.X, (float)sy - mouse.Y)).Length;
                 
                 ImGui.Text($"Reproject Drift: {dist:F2}px");
                 if (dist > 1.0f) ImGui.TextColored(new System.Numerics.Vector4(1,0,0,1), "WARNING: High Drift!");
@@ -161,10 +160,10 @@ public class MapWindow : GameWindow
     protected override void OnResize(ResizeEventArgs e)
     {
         base.OnResize(e);
-        GL.Viewport(0, 0, Size.X, Size.Y);
-        _imGuiController.WindowResized(Size.X, Size.Y);
-        _camera.ViewportWidth = Size.X;
-        _camera.ViewportHeight = Size.Y;
+        GL.Viewport(0, 0, ClientSize.X, ClientSize.Y);
+        _imGuiController.WindowResized(ClientSize.X, ClientSize.Y);
+        _camera.ViewportWidth = ClientSize.X;
+        _camera.ViewportHeight = ClientSize.Y;
     }
     
     protected override void OnUpdateFrame(FrameEventArgs e)
@@ -226,7 +225,7 @@ public class MapWindow : GameWindow
             double prevX = _camera.X;
             double prevY = _camera.Y;
             
-            _camera.Pan(-deltaX, deltaY, Size.X, Size.Y);
+            _camera.Pan(-deltaX, deltaY, ClientSize.X, ClientSize.Y);
             
             // Undo if at limits
             if (_camera.IsAtLimits())
@@ -270,7 +269,7 @@ public class MapWindow : GameWindow
         double prevX = _camera.X;
         double prevY = _camera.Y;
         
-        _camera.ZoomAt(e.OffsetY * 0.5f, MousePosition.X, MousePosition.Y, Size.X, Size.Y);
+        _camera.ZoomAt(e.OffsetY * 0.5f, MousePosition.X, MousePosition.Y, ClientSize.X, ClientSize.Y);
         
         // Undo if at limits
         if (_camera.IsAtLimits())
