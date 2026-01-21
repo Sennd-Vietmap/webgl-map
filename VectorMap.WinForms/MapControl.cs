@@ -38,7 +38,7 @@ namespace VectorMap.WinForms
         private GLBModel? _pendingModel;
         private DateTime _lastViewportUpdate = DateTime.MinValue;
         private System.Windows.Forms.Timer _debounceTimer;
-        private double _lastUpdateX, _lastUpdateY, _lastUpdateZoom;
+        private double _lastUpdateX, _lastUpdateY, _lastUpdateZoom, _lastUpdateBearing, _lastUpdatePitch;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -133,30 +133,32 @@ namespace VectorMap.WinForms
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             // Intelligent Viewport Management
-            bool isMoving = _isDragging || _isRotating;
-            
-            // 1. Check for Viewport Exhaustion (Move out of current loaded area)
-            // If we move more than 0.5 tiles or zoom changes significantly, update immediately
             double zoomDiff = Math.Abs(_camera.Zoom - _lastUpdateZoom);
             double distSq = Math.Pow(_camera.X - _lastUpdateX, 2) + Math.Pow(_camera.Y - _lastUpdateY, 2);
-            double threshold = 0.5 / Math.Pow(2, _camera.Zoom); // 0.5 tile distance
+            double threshold = 0.5 / Math.Pow(2, _camera.Zoom); 
             
-            bool isOutOfSync = zoomDiff > 0.01 || distSq > 1e-12;
+            bool isOutOfSync = zoomDiff > 0.01 || distSq > 1e-12 || 
+                             Math.Abs(_camera.Bearing - _lastUpdateBearing) > 0.1 ||
+                             Math.Abs(_camera.Pitch - _lastUpdatePitch) > 0.1;
 
-            if (zoomDiff > 0.5 || distSq > threshold * threshold)
+            if (isOutOfSync)
             {
-                UpdateViewportImmediate();
-                _debounceTimer.Stop(); 
-            }
-            else if (isOutOfSync)
-            {
-                // Debounce regular updates (Wait for 0.5s stop)
-                _debounceTimer.Stop();
-                _debounceTimer.Start();
+                // To avoid lag, we NEVER update tiles immediately during rotation or pitch.
+                // We only force an immediate update for large Panning or Zooming changes.
+                if (!_isRotating && (zoomDiff > 0.5 || distSq > threshold * threshold))
+                {
+                    UpdateViewportImmediate();
+                    _debounceTimer.Stop(); 
+                }
+                else
+                {
+                    // Debounce (Wait for 0.5s stop)
+                    _debounceTimer.Stop();
+                    _debounceTimer.Start();
+                }
             }
             else 
             {
-                // Stay quiet if we are already in sync
                 _debounceTimer.Stop();
             }
 
@@ -271,8 +273,10 @@ namespace VectorMap.WinForms
             _lastUpdateX = _camera.X;
             _lastUpdateY = _camera.Y;
             _lastUpdateZoom = _camera.Zoom;
+            _lastUpdateBearing = _camera.Bearing;
+            _lastUpdatePitch = _camera.Pitch;
             _lastViewportUpdate = DateTime.Now;
-            Invalidate(); // Refresh with new tiles
+            Invalidate(); 
         }
     }
 }
