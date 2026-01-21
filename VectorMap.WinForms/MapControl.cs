@@ -21,6 +21,8 @@ namespace VectorMap.WinForms
         private Camera _camera;
         private TileManager _tileManager;
         private MapRenderer _renderer;
+        private ModelRenderer _modelRenderer;
+        private Vector3 _modelPosition;
         private bool _isDragging;
         private bool _isRotating;
         private PointF _lastMousePos;
@@ -31,6 +33,7 @@ namespace VectorMap.WinForms
         private double _fps;
         private long _lastFpsUpdate;
         private bool _isInitialized = false;
+        private bool _modelLoaded = false;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -65,6 +68,11 @@ namespace VectorMap.WinForms
                 { "housenumber", new Color4(150/255f, 20/255f, 150/255f, 1f) }
             };
             _renderer = new MapRenderer(colors);
+            
+            // 3D Model initialization
+            _modelRenderer = new ModelRenderer();
+            var merc = MercatorCoordinate.FromLngLat(-73.9834558, 40.6932723);
+            _modelPosition = new Vector3((float)merc.x, (float)merc.y, 0.000005f); // Slightly above ground
             
             _stopwatch.Start();
 
@@ -111,9 +119,27 @@ namespace VectorMap.WinForms
             // Update Tiles
             _tileManager.UpdateViewport(_camera.GetBounds(), (int)_camera.Zoom);
 
-            // Render
+            // Render Map
             var tiles = _tileManager.GetRenderableTiles();
             _renderer.Render(_camera, tiles, new HashSet<string>());
+
+            // Render 3D Model (Demo)
+            // Try to load GLB if exists, otherwise use Cube
+            if (!_modelLoaded) {
+                try {
+                    string glbPath = "VectorMap.Core/Assets/Models/box.glb";
+                    if (System.IO.File.Exists(glbPath)) {
+                        _modelRenderer.LoadModel(GLBModel.Load(glbPath));
+                    } else {
+                        _modelRenderer.LoadModel(GLBModel.CreateCube());
+                    }
+                } catch {
+                    _modelRenderer.LoadModel(GLBModel.CreateCube());
+                }
+                _modelLoaded = true;
+            }
+
+            _modelRenderer.Render(_camera, _modelPosition, 50.0f, Color4.Red); // 50 meters wide
 
             // FPS Counter
             _frameCount++;

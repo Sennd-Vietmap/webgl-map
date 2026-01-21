@@ -19,6 +19,9 @@ public class Camera
     public int ViewportWidth { get; set; }
     public int ViewportHeight { get; set; }
     
+    public double Lat => MercatorCoordinate.LatFromMercatorY(Y);
+    public double Lng => MercatorCoordinate.LngFromMercatorX(X);
+    
     public Camera(double lng, double lat, double zoom, int width, int height)
     {
         var (x, y) = MercatorCoordinate.FromLngLat(lng, lat);
