@@ -147,3 +147,8 @@ When zooming in 2D, we simply unproject $(X, Y)$. In 3D (Pitched View), this fai
     3.  Calculate the exact intersection $T$ where the Ray hits the Plane.
     4.  This gives the precise World Coordinate under the cursor, ensuring the map doesn't "slide" when zooming while tilted.
 
+### Precision & Coordinate Systems
+*   **Viewport Size**: Always use `ClientSize` (OpenTK) or `InnerWidth/Height` (Web). Using the full Window `Size` includes title bars and borders, causing a coordinate offset (e.g., mouse at perceived (0,0) is actually (0, 30)).
+*   **Double vs Float**: GPU rendering works fine with `float` (Matrix4) because vertices are relative to the camera. However, for **Picking** (ScreenToWorld) at Zoom 20, the coordinate differences are smaller than `float` precision ($10^{-7}$).
+    *   **Solution**: Implement a shadow `Matrix4d` (Double Precision) pipeline for CPU-side calculations (Picking/Panning). Do not rely on valid `Matrix4` inversion at high zoom levels.
+

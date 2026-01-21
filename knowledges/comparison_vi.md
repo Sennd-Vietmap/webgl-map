@@ -147,3 +147,8 @@ Khi zoom trong 2D, ta chỉ đơn giản là unproject $(X, Y)$. Trong 3D (khi c
     3.  Tính toán chính xác thời điểm $T$ mà Tia cắt Mặt phẳng.
     4.  Điều này cho ta Tọa độ Thế giới chính xác ngay dưới con trỏ chuột, đảm bảo bản đồ không bị "trượt" đi khi zoom lúc đang nghiêng.
 
+### Độ Chính Xác & Hệ Tọa Độ
+*   **Kích thước Viewport**: Luôn sử dụng `ClientSize` (OpenTK) hoặc `InnerWidth/Height` (Web). Sử dụng `Size` (kích thước cửa sổ tổng) bao gồm cả tiêu đề và viền, gây ra sai lệch tọa độ (ví dụ: chuột ở (0,0) thực ra là (0,30)).
+*   **Double vs Float**: GPU xử lý tốt với `float` (Matrix4) vì các đỉnh (vertex) được tính tương đối so với camera. Tuy nhiên, để **Picking** (ScreenToWorld) ở Zoom 20, sự chênh lệch tọa độ nhỏ hơn độ chính xác của `float` ($10^{-7}$).
+    *   **Giải pháp**: Cài đặt một luồng xử lý `Matrix4d` (Double Precision) riêng biệt cho tính toán trên CPU (Picking/Panning). Không dựa vào việc nghịch đảo `Matrix4` ở mức zoom lớn.
+
