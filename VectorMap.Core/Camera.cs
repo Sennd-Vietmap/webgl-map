@@ -87,16 +87,16 @@ public class Camera
     }
     
     /// <summary>
-    /// Pan the camera by a delta in screen pixels
+    /// Pan the camera so the world point at prevScreen stays under curScreen
+    /// This is the most accurate panning method as it handles rotation and pitch automatically.
     /// </summary>
-    public void Pan(float deltaX, float deltaY, int screenWidth, int screenHeight)
+    public void Pan(float prevX, float prevY, float curX, float curY)
     {
-        double worldSize = TileSize * Math.Pow(2, Zoom);
-        // Dragging moves the world, so camera moves opposite
-        X -= deltaX / worldSize;
-        // Invert Y delta because Mercator Y goes Down, but screen Y goes Down.
-        // Drag Down (+Y) -> Map moves Down. Camera moves Up (Decrease Y).
-        Y -= deltaY / worldSize; 
+        var p1 = ScreenToWorld(prevX, prevY, ViewportWidth, ViewportHeight);
+        var p2 = ScreenToWorld(curX, curY, ViewportWidth, ViewportHeight);
+        
+        X += (p1.x - p2.x);
+        Y += (p1.y - p2.y);
     }
     
     /// <summary>

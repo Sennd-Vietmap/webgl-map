@@ -21,6 +21,7 @@ public class FeatureSet
     public string LayerName { get; set; } = string.Empty;
     public GeometryType Type { get; set; }
     public float[] Vertices { get; set; } = Array.Empty<float>();
+    public uint[] Indices { get; set; } = Array.Empty<uint>();
 }
 
 /// <summary>

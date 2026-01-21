@@ -33,17 +33,17 @@ public class VectorTileParser
             
             var reader = new PbfReader(data);
             
-            // Dictionary to collect vertices by layer and type
-            var layerVertices = new Dictionary<string, Dictionary<GeometryType, List<float>>>();
+            // Dictionary to collect vertices and indices by layer and type
+            var layerDataMap = new Dictionary<string, Dictionary<GeometryType, (List<float> V, List<uint> I)>>();
             
             while (reader.NextField())
             {
                 if (reader.Tag == 3) // Layers
                 {
-                    var layerData = reader.ReadBytes();
-                    if (layerData.Length > 0)
+                    var bytes = reader.ReadBytes();
+                    if (bytes.Length > 0)
                     {
-                        ParseLayer(layerData, tile, layerVertices);
+                        ParseLayer(bytes, tile, layerDataMap);
                     }
                 }
                 else
@@ -53,18 +53,19 @@ public class VectorTileParser
             }
             
             // Convert to FeatureSet list
-            foreach (var layer in layerVertices)
+            foreach (var layer in layerDataMap)
             {
-                foreach (var typeVertices in layer.Value)
+                foreach (var typeData in layer.Value)
                 {
-                    if (typeVertices.Value.Count > 0)
+                    if (typeData.Value.V.Count > 0)
                     {
                         result.Add(new FeatureSet
                         {
-                            Coordinate = tile, // Track parent tile
+                            Coordinate = tile,
                             LayerName = layer.Key,
-                            Type = typeVertices.Key,
-                            Vertices = typeVertices.Value.ToArray()
+                            Type = typeData.Key,
+                            Vertices = typeData.Value.V.ToArray(),
+                            Indices = typeData.Value.I.ToArray()
                         });
                     }
                 }
@@ -79,7 +80,7 @@ public class VectorTileParser
     }
     
     private void ParseLayer(byte[] data, TileCoordinate tile, 
-        Dictionary<string, Dictionary<GeometryType, List<float>>> layerVertices)
+        Dictionary<string, Dictionary<GeometryType, (List<float> V, List<uint> I)>> layerData)
     {
         var reader = new PbfReader(data);
         
@@ -114,33 +115,29 @@ public class VectorTileParser
             }
         }
         
-        // Skip if not a layer we want
         if (!_layersToLoad.Contains(layerName))
             return;
             
-        // Initialize layer storage
-        if (!layerVertices.ContainsKey(layerName))
+        if (!layerData.ContainsKey(layerName))
         {
-            layerVertices[layerName] = new Dictionary<GeometryType, List<float>>
+            layerData[layerName] = new Dictionary<GeometryType, (List<float> V, List<uint> I)>
             {
-                { GeometryType.Point, new List<float>() },
-                { GeometryType.Line, new List<float>() },
-                { GeometryType.Polygon, new List<float>() }
+                { GeometryType.Point, (new List<float>(), new List<uint>()) },
+                { GeometryType.Line, (new List<float>(), new List<uint>()) },
+                { GeometryType.Polygon, (new List<float>(), new List<uint>()) }
             };
         }
         
-        // Parse features
         foreach (var featureData in features)
         {
-            ParseFeature(featureData, tile, extent, layerVertices[layerName]);
+            ParseFeature(featureData, tile, extent, layerData[layerName]);
         }
     }
     
     private void ParseFeature(byte[] data, TileCoordinate tile, int extent,
-        Dictionary<GeometryType, List<float>> vertices)
+        Dictionary<GeometryType, (List<float> V, List<uint> I)> layerStorage)
     {
         var reader = new PbfReader(data);
-        
         GeometryType type = GeometryType.Unknown;
         byte[]? geometryData = null;
         
@@ -163,17 +160,18 @@ public class VectorTileParser
         if (geometryData == null || type == GeometryType.Unknown)
             return;
             
-        // Decode geometry commands
         var coords = DecodeGeometry(geometryData, type, tile, extent);
-        
-        // Convert to vertices based on type
+        var (vList, iList) = layerStorage[type];
+
         switch (type)
         {
             case GeometryType.Polygon:
                 if (coords.Count > 0)
                 {
-                    var polygonVertices = GeometryConverter.PolygonToVertices(coords.ToArray());
-                    vertices[type].AddRange(polygonVertices);
+                    var (polyV, polyI) = GeometryConverter.PolygonToVertices(coords.ToArray());
+                    uint baseIdx = (uint)(vList.Count / 2);
+                    vList.AddRange(polyV);
+                    foreach (var idx in polyI) iList.Add(idx + baseIdx);
                 }
                 break;
                 
@@ -182,8 +180,10 @@ public class VectorTileParser
                 {
                     if (ring.Length >= 2)
                     {
-                        var lineVertices = GeometryConverter.LineToVertices(ring);
-                        vertices[type].AddRange(lineVertices);
+                        var (lineV, lineI) = GeometryConverter.LineToVertices(ring);
+                        uint baseIdx = (uint)(vList.Count / 2);
+                        vList.AddRange(lineV);
+                        foreach (var idx in lineI) iList.Add(idx + baseIdx);
                     }
                 }
                 break;
@@ -193,8 +193,8 @@ public class VectorTileParser
                 {
                     foreach (var pt in ring)
                     {
-                        var pointVertices = GeometryConverter.PointToVertices(pt);
-                        vertices[type].AddRange(pointVertices);
+                        var pointV = GeometryConverter.PointToVertices(pt);
+                        vList.AddRange(pointV);
                     }
                 }
                 break;
@@ -235,8 +235,8 @@ public class VectorTileParser
                     cursorX += dx;
                     cursorY += dy;
                     
-                    // Convert raw tile integer coordinates to normalized 0..1 range
-                    var (nx, ny) = TileToNormalized(cursorX, cursorY, extent);
+                    // Convert tile coordinates to lat/lng
+                    var (lng, lat) = TileToLngLat(cursorX, cursorY, tile, extent);
                     
                     if (cmd == 1) // MoveTo - start new ring
                     {
@@ -247,7 +247,7 @@ public class VectorTileParser
                         }
                     }
                     
-                    currentRing.Add(new[] { nx, ny });
+                    currentRing.Add(new[] { lng, lat });
                 }
                 else if (cmd == 7) // ClosePath
                 {
@@ -268,11 +268,13 @@ public class VectorTileParser
         return rings;
     }
     
-    private static (double nx, double ny) TileToNormalized(int x, int y, int extent)
+    private static (double lng, double lat) TileToLngLat(int x, int y, TileCoordinate tile, int extent)
     {
-        // Simply normalize the coordinate relative to the tile extent (usually 4096)
-        // This is extremely precise as it uses the raw integer offsets
-        return ((double)x / extent, (double)y / extent);
+        int n = 1 << tile.Z;
+        double lng = (tile.X + (double)x / extent) / n * 360.0 - 180.0;
+        double latRad = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * (tile.Y + (double)y / extent) / n)));
+        double lat = latRad * 180.0 / Math.PI;
+        return (lng, lat);
     }
     
     private static int ZigZagDecode(uint n)

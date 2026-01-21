@@ -12,6 +12,7 @@ public class MapRenderer : IDisposable
     private int _shaderProgram;
     private int _vao;
     private int _vbo;
+    private int _ebo;
     private int _matrixLocation;
     private int _colorLocation;
     private int _scaleLocation;
@@ -78,6 +79,7 @@ public class MapRenderer : IDisposable
         // Create VAO and VBO
         _vao = GL.GenVertexArray();
         _vbo = GL.GenBuffer();
+        _ebo = GL.GenBuffer();
         
         GL.BindVertexArray(_vao);
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
@@ -116,6 +118,7 @@ public class MapRenderer : IDisposable
             Initialize();
         }
         
+        GL.Disable(EnableCap.DepthTest); // Map is 2D-stacked by uDepth
         GL.Enable(EnableCap.Multisample);
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -131,89 +134,119 @@ public class MapRenderer : IDisposable
         GL.Uniform1(_scaleLocation, 1.0f);
         GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
         
-        // Render Tile-by-Tile to maintain high precision
+        // group all feature sets by layer across all tiles for batching
+        var layerGroups = new Dictionary<string, List<FeatureSet>>();
         foreach (var tile in tiles)
         {
-            // Compute a high-precision Tile-to-Clip matrix
-            // This subtraction is done in DOUBLE to avoid jitter
-            double worldSize = 512 * Math.Pow(2, camera.Zoom);
-            double tileScale = 1.0 / Math.Pow(2, tile.Coordinate.Z);
-            
-            // Relative position of tile origin from camera center
-            double relX = (tile.Coordinate.X - camera.X * Math.Pow(2, tile.Coordinate.Z)) * tileScale;
-            double relY = (tile.Coordinate.Y - camera.Y * Math.Pow(2, tile.Coordinate.Z)) * tileScale;
-            
-            // Base matrix for this tile: local (0..1) -> world-relative -> clip
-            // We reuse the Camera's View and Projection but replace the World translation
-            Matrix4d tileMatrix = Matrix4d.CreateScale(tileScale * worldSize, -tileScale * worldSize, 1.0);
-            tileMatrix *= Matrix4d.CreateTranslation((tile.Coordinate.X * tileScale - camera.X) * worldSize, (camera.Y - tile.Coordinate.Y * tileScale) * worldSize, 0);
-            tileMatrix *= Matrix4d.CreateRotationZ(MathHelper.DegreesToRadians(camera.Bearing));
-            tileMatrix *= Matrix4d.CreateRotationX(MathHelper.DegreesToRadians(-camera.Pitch));
-            
-            // Perspective / View Altitude part
-            double fovVal = MathHelper.DegreesToRadians(60.0);
-            double altitude = (camera.ViewportHeight / 2.0 / Math.Tan(fovVal / 2.0));
-            tileMatrix *= Matrix4d.CreateTranslation(0, 0, -altitude);
-            tileMatrix *= Matrix4d.CreatePerspectiveFieldOfView(fovVal, (double)camera.ViewportWidth / camera.ViewportHeight, 0.1, altitude * 100.0);
-
-            Matrix4 floatMatrix = new Matrix4(
-                (float)tileMatrix.Row0.X, (float)tileMatrix.Row0.Y, (float)tileMatrix.Row0.Z, (float)tileMatrix.Row0.W,
-                (float)tileMatrix.Row1.X, (float)tileMatrix.Row1.Y, (float)tileMatrix.Row1.Z, (float)tileMatrix.Row1.W,
-                (float)tileMatrix.Row2.X, (float)tileMatrix.Row2.Y, (float)tileMatrix.Row2.Z, (float)tileMatrix.Row2.W,
-                (float)tileMatrix.Row3.X, (float)tileMatrix.Row3.Y, (float)tileMatrix.Row3.Z, (float)tileMatrix.Row3.W
-            );
-
-            GL.UniformMatrix4(_matrixLocation, false, ref floatMatrix);
-            GL.Uniform1(_scaleLocation, 1.0f);
-            GL.Uniform2(_offsetLocation, 0.0f, 0.0f);
-
-            // Group features by layer WITHIN the tile
-            var layerGroups = tile.FeatureSets.GroupBy(f => f.LayerName);
-            float currentDepth = 0.0f;
-            const float depthStep = 0.000001f;
-
-            foreach (var orderLayer in GlobalLayerOrder)
+            foreach (var featureSet in tile.FeatureSets)
             {
-                var group = layerGroups.FirstOrDefault(g => g.Key == orderLayer);
-                if (group != null)
+                if (!layerGroups.TryGetValue(featureSet.LayerName, out var list))
                 {
-                    GL.Uniform1(_depthLocation, currentDepth);
-                    RenderGroup(group.ToList(), disabledLayers);
-                    currentDepth += depthStep;
+                    list = new List<FeatureSet>();
+                    layerGroups[featureSet.LayerName] = list;
                 }
+                list.Add(featureSet);
             }
         }
-        
+
+        // Render layers in the predefined order
+        float currentDepth = 0.0f;
+        const float depthStep = 0.000001f;
+
+        foreach (var layerName in GlobalLayerOrder)
+        {
+            if (layerGroups.TryGetValue(layerName, out var group))
+            {
+                GL.Uniform1(_depthLocation, currentDepth);
+                RenderLayer(layerName, group, disabledLayers);
+                layerGroups.Remove(layerName);
+                currentDepth += depthStep;
+            }
+        }
+
+        // 3. Render any remaining layers (unrecognized)
+        foreach (var entry in layerGroups)
+        {
+            GL.Uniform1(_depthLocation, currentDepth);
+            RenderLayer(entry.Key, entry.Value, disabledLayers);
+            currentDepth += depthStep;
+        }
+
         GL.BindVertexArray(0);
         GL.UseProgram(0);
+        GL.Enable(EnableCap.DepthTest);
+        GL.DepthFunc(DepthFunction.Less);
     }
 
-    private void RenderGroup(List<FeatureSet> featureSets, HashSet<string>? disabledLayers)
+    private void RenderLayer(string layerName, List<FeatureSet> featureSets, HashSet<string>? disabledLayers)
     {
-        foreach (var featureSet in featureSets)
+        if (disabledLayers?.Contains(layerName) == true) return;
+        if (!_layerColors.TryGetValue(layerName, out var color)) return;
+
+        // Bucket for each primitive type
+        var polyV = new List<float>();
+        var polyI = new List<uint>();
+        
+        var lineV = new List<float>();
+        var lineI = new List<uint>();
+        
+        var pointV = new List<float>();
+
+        foreach (var fs in featureSets)
         {
-            if (disabledLayers?.Contains(featureSet.LayerName) == true) continue;
-            if (!_layerColors.TryGetValue(featureSet.LayerName, out var color)) continue;
-            if (featureSet.Vertices.Length == 0) continue;
+            if (fs.Vertices.Length == 0) continue;
             
-            GL.Uniform4(_colorLocation, color.R, color.G, color.B, color.A);
-            
-            GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-            GL.BufferData(BufferTarget.ArrayBuffer, featureSet.Vertices.Length * sizeof(float), 
-                featureSet.Vertices, BufferUsageHint.DynamicDraw);
-            
-            GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
-            GL.EnableVertexAttribArray(0);
-            
-            PrimitiveType primitiveType = featureSet.Type switch
+            uint baseIdx;
+            switch (fs.Type)
             {
-                GeometryType.Point => PrimitiveType.Points,
-                GeometryType.Line => PrimitiveType.Lines,
-                _ => PrimitiveType.Triangles
-            };
-            
-            GL.DrawArrays(primitiveType, 0, featureSet.Vertices.Length / 2);
+                case GeometryType.Polygon:
+                    baseIdx = (uint)(polyV.Count / 2);
+                    polyV.AddRange(fs.Vertices);
+                    foreach (var idx in fs.Indices) polyI.Add(idx + baseIdx);
+                    break;
+                case GeometryType.Line:
+                    baseIdx = (uint)(lineV.Count / 2);
+                    lineV.AddRange(fs.Vertices);
+                    foreach (var idx in fs.Indices) lineI.Add(idx + baseIdx);
+                    break;
+                case GeometryType.Point:
+                    pointV.AddRange(fs.Vertices);
+                    break;
+            }
         }
+
+        GL.Uniform4(_colorLocation, color.R, color.G, color.B, color.A);
+
+        if (polyI.Count > 0) DrawIndexed(polyV, polyI, PrimitiveType.Triangles);
+        if (lineI.Count > 0) DrawIndexed(lineV, lineI, PrimitiveType.Lines);
+        if (pointV.Count > 0) DrawPoints(pointV);
+    }
+
+    private void DrawIndexed(List<float> v, List<uint> i, PrimitiveType type)
+    {
+        float[] vArr = v.ToArray();
+        uint[] iArr = i.ToArray();
+        
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, vArr.Length * sizeof(float), vArr, BufferUsageHint.StreamDraw);
+        
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, iArr.Length * sizeof(uint), iArr, BufferUsageHint.StreamDraw);
+        
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+        
+        GL.DrawElements(type, iArr.Length, DrawElementsType.UnsignedInt, 0);
+    }
+
+    private void DrawPoints(List<float> v)
+    {
+        float[] vArr = v.ToArray();
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, vArr.Length * sizeof(float), vArr, BufferUsageHint.StreamDraw);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        GL.EnableVertexAttribArray(0);
+        GL.DrawArrays(PrimitiveType.Points, 0, vArr.Length / 2);
     }
     
     /// <summary>
@@ -285,6 +318,7 @@ void main()
         {
             GL.DeleteVertexArray(_vao);
             GL.DeleteBuffer(_vbo);
+            GL.DeleteBuffer(_ebo);
             GL.DeleteProgram(_shaderProgram);
             _isInitialized = false;
         }

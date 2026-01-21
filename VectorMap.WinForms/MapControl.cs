@@ -18,12 +18,11 @@ namespace VectorMap.WinForms
 {
     public class MapControl : GLControl
     {
-        private Camera _camera;
-        private TileManager _tileManager;
-        private MapRenderer _renderer;
-        private ModelRenderer _modelRenderer;
+        private Camera? _camera;
+        private TileManager? _tileManager;
+        private MapRenderer? _renderer;
+        private ModelRenderer? _modelRenderer;
         private Vector3 _modelPosition;
-        private bool _isDragging;
         private bool _isRotating;
         private PointF _lastMousePos;
         
@@ -37,9 +36,15 @@ namespace VectorMap.WinForms
         private bool _isModelLoading = false;
         private GLBModel? _pendingModel;
         private DateTime _lastViewportUpdate = DateTime.MinValue;
-        private System.Windows.Forms.Timer _debounceTimer;
+        private System.Windows.Forms.Timer? _debounceTimer;
+        private System.Windows.Forms.Timer? _inertiaTimer;
+        private Vector2 _velocity;
+        private PointF _lastPanPos;
+        private long _lastMoveTime;
+        private Point _mouseDownPos;
+        private bool _isDraggingActive = false;
         private double _lastUpdateX, _lastUpdateY, _lastUpdateZoom, _lastUpdateBearing, _lastUpdatePitch;
-        private Label _infoLabel;
+        private Label? _infoLabel;
 
         public MapControl() : base(new GLControlSettings { NumberOfSamples = 4 })
         {
@@ -111,6 +116,23 @@ namespace VectorMap.WinForms
                 _debounceTimer.Stop();
                 UpdateViewportImmediate();
             };
+
+            // Inertia Timer for Kinetic Panning
+            _inertiaTimer = new System.Windows.Forms.Timer();
+            _inertiaTimer.Interval = 16; // ~60fps
+            _inertiaTimer.Tick += (s, args) => {
+                if (_camera == null) return;
+                
+                _camera.Pan(_lastPanPos.X, _lastPanPos.Y, _lastPanPos.X + _velocity.X, _lastPanPos.Y + _velocity.Y);
+                _velocity *= 0.92f; // Friction
+                
+                if (_velocity.Length < 0.1f)
+                {
+                    _inertiaTimer.Stop();
+                    _velocity = Vector2.Zero;
+                }
+                Invalidate();
+            };
         }
 
         protected override void OnResize(EventArgs e)
@@ -141,6 +163,8 @@ namespace VectorMap.WinForms
             {
                 return;
             }
+
+            if (_camera == null || _tileManager == null || _renderer == null || _modelRenderer == null) return;
 
             GL.ClearColor(Color.FromArgb(240, 240, 240));
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
@@ -194,7 +218,10 @@ namespace VectorMap.WinForms
             _modelRenderer.Render(_camera, _modelPosition, 50.0f); // 50 meters wide
 
             // Update Info UI
-            _infoLabel.Text = $"Zoom: {_camera.Zoom:F2}\nLat:  {_camera.Lat:F6}\nLng:  {_camera.Lng:F6}";
+            if (_infoLabel != null)
+            {
+                _infoLabel.Text = $"Zoom: {_camera.Zoom:F2}\nLat:  {_camera.Lat:F6}\nLng:  {_camera.Lng:F6}";
+            }
 
             // FPS Counter
             _frameCount++;
@@ -213,45 +240,103 @@ namespace VectorMap.WinForms
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) _isDragging = true;
-            else if (e.Button == MouseButtons.Right) _isRotating = true;
+            _mouseDownPos = e.Location;
             _lastMousePos = e.Location;
+            _lastPanPos = e.Location;
+            _velocity = Vector2.Zero;
+            _inertiaTimer?.Stop();
+            _lastMoveTime = _stopwatch.ElapsedMilliseconds;
+            
+            if (e.Button == MouseButtons.Middle)
+            {
+                _isDraggingActive = true;
+                this.Cursor = Cursors.NoMove2D;
+            }
+            else if (e.Button == MouseButtons.Left) 
+            {
+                _isDraggingActive = false; 
+                this.Cursor = Cursors.Hand;
+            }
+            else if (e.Button == MouseButtons.Right) 
+            {
+                _isRotating = true;
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            _isDragging = false;
+            
+            // If dragging with speed, start inertia
+            if (_isDraggingActive && _velocity.Length > 2.0f)
+            {
+                _inertiaTimer?.Start();
+            }
+
+            _isDraggingActive = false;
             _isRotating = false;
+            this.Cursor = Cursors.Default;
+            _debounceTimer?.Stop();
+            _debounceTimer?.Start();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            if (_isDragging)
+            long now = _stopwatch.ElapsedMilliseconds;
+            long dt = Math.Max(1, now - _lastMoveTime);
+            
+            float dx = e.X - _lastMousePos.X;
+            float dy = e.Y - _lastMousePos.Y;
+
+            // PAC-style or CAD-style panning with Middle Mouse
+            if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Left && _isDraggingActive))
             {
-                float dx = e.X - _lastMousePos.X;
-                float dy = e.Y - _lastMousePos.Y;
-                _camera.Pan(-dx, dy, ClientSize.Width, ClientSize.Height);
+                if (_camera != null)
+                {
+                    _camera.Pan(_lastMousePos.X, _lastMousePos.Y, e.X, e.Y);
+                    
+                    // Update velocity (low-pass filter for smoothness)
+                    float vX = dx;
+                    float vY = dy;
+                    _velocity = _velocity * 0.4f + new Vector2(vX, vY) * 0.6f;
+                    _lastPanPos = e.Location;
+                }
                 _lastMousePos = e.Location;
                 Invalidate();
+            }
+            else if (e.Button == MouseButtons.Left)
+            {
+                if (!_isDraggingActive)
+                {
+                    int dxStart = Math.Abs(e.X - _mouseDownPos.X);
+                    int dyStart = Math.Abs(e.Y - _mouseDownPos.Y);
+                    if (dxStart > 3 || dyStart > 3)
+                    {
+                        _isDraggingActive = true;
+                        this.Cursor = Cursors.SizeAll; 
+                    }
+                }
             }
             else if (_isRotating)
             {
-                float dx = e.X - _lastMousePos.X;
-                float dy = e.Y - _lastMousePos.Y;
-                _camera.Bearing += dx * 0.5f;
-                _camera.Pitch = Math.Clamp(_camera.Pitch + dy * 0.5f, 0, 85);
+                if (_camera != null)
+                {
+                    _camera.Bearing += dx * 0.5f;
+                    _camera.Pitch = Math.Clamp(_camera.Pitch + dy * 0.5f, 0, 85);
+                }
                 _lastMousePos = e.Location;
                 Invalidate();
             }
+            
+            _lastMoveTime = now;
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
             float delta = e.Delta / 120.0f;
-            _camera.ZoomAt(delta * 0.5f, e.X, e.Y, ClientSize.Width, ClientSize.Height);
+            _camera?.ZoomAt(delta * 0.5f, e.X, e.Y, ClientSize.Width, ClientSize.Height);
             Invalidate();
         }
         private async Task LoadModelAsync()

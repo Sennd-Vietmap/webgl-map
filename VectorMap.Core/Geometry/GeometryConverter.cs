@@ -11,7 +11,7 @@ public static class GeometryConverter
     /// <summary>
     /// Convert polygon coordinates to triangulated vertices
     /// </summary>
-    public static float[] PolygonToVertices(double[][][] coordinates)
+    public static (float[] Vertices, uint[] Indices) PolygonToVertices(double[][][] coordinates)
     {
         var tess = new Tess();
 
@@ -27,7 +27,7 @@ public static class GeometryConverter
                 if (cleaned.Count > 0)
                 {
                     var last = cleaned[^1];
-                    if (Math.Abs(pt[0] - last[0]) < 1e-12 && Math.Abs(pt[1] - last[1]) < 1e-12)
+                    if (Math.Abs(pt[0] - last[0]) < 1e-9 && Math.Abs(pt[1] - last[1]) < 1e-9)
                         continue;
                 }
                 cleaned.Add(pt);
@@ -38,7 +38,7 @@ public static class GeometryConverter
             {
                 var first = cleaned[0];
                 var last = cleaned[^1];
-                if (Math.Abs(first[0] - last[0]) < 1e-12 && Math.Abs(first[1] - last[1]) < 1e-12)
+                if (Math.Abs(first[0] - last[0]) < 1e-9 && Math.Abs(first[1] - last[1]) < 1e-9)
                 {
                     cleaned.RemoveAt(cleaned.Count - 1);
                 }
@@ -46,11 +46,12 @@ public static class GeometryConverter
 
             if (cleaned.Count < 3) continue;
 
-            // 3. Add to tessellator (Input is already normalized 0..1 rel to tile)
+            // 3. Convert to Mercator and add to tessellator
             var contour = new ContourVertex[cleaned.Count];
             for (int i = 0; i < cleaned.Count; i++)
             {
-                contour[i] = new ContourVertex { Position = new Vec3 { X = (float)cleaned[i][0], Y = (float)cleaned[i][1], Z = 0 } };
+                var (x, y) = MercatorCoordinate.FromLngLat(cleaned[i][0], cleaned[i][1]);
+                contour[i] = new ContourVertex { Position = new Vec3 { X = (float)x, Y = (float)y, Z = 0 } };
             }
             tess.AddContour(contour);
         }
@@ -59,54 +60,55 @@ public static class GeometryConverter
         {
             tess.Tessellate(WindingRule.EvenOdd, ElementType.Polygons, 3, (Vec3 pos, object[] data, float[] weights) => null);
             
-            var vertices = new List<float>();
-            for (int i = 0; i < tess.ElementCount; i++)
+            // Output unique vertices
+            float[] vertices = new float[tess.VertexCount * 2];
+            for (int i = 0; i < tess.VertexCount; i++)
             {
-                for (int j = 0; j < 3; j++)
-                {
-                    int index = tess.Elements[i * 3 + j];
-                    vertices.Add(tess.Vertices[index].Position.X);
-                    vertices.Add(tess.Vertices[index].Position.Y);
-                }
+                vertices[i * 2] = tess.Vertices[i].Position.X;
+                vertices[i * 2 + 1] = tess.Vertices[i].Position.Y;
             }
-            return vertices.ToArray();
+
+            // Output indices
+            uint[] indices = new uint[tess.ElementCount * 3];
+            for (int i = 0; i < tess.ElementCount * 3; i++)
+            {
+                indices[i] = (uint)tess.Elements[i];
+            }
+
+            return (vertices, indices);
         }
         catch
         {
-            return Array.Empty<float>();
+            return (Array.Empty<float>(), Array.Empty<uint>());
         }
     }
     
-    public static float[] LineToVertices(double[][] coordinates)
+    public static (float[] Vertices, uint[] Indices) LineToVertices(double[][] coordinates)
     {
-        if (coordinates.Length < 2) return Array.Empty<float>();
-        var vertices = new List<float>();
-        const double epsilon = 1e-12;
+        if (coordinates.Length < 2) return (Array.Empty<float>(), Array.Empty<uint>());
         
-        var xPrev = coordinates[0][0];
-        var yPrev = coordinates[0][1];
-
-        for (int i = 1; i < coordinates.Length; i++)
+        var vertices = new List<float>();
+        var indices = new List<uint>();
+        
+        for (int i = 0; i < coordinates.Length; i++)
         {
-            var xCurr = coordinates[i][0];
-            var yCurr = coordinates[i][1];
+            var (x, y) = MercatorCoordinate.FromLngLat(coordinates[i][0], coordinates[i][1]);
+            vertices.Add((float)x);
+            vertices.Add((float)y);
             
-            if (Math.Abs(xCurr - xPrev) < epsilon && Math.Abs(yCurr - yPrev) < epsilon)
-                continue;
-
-            vertices.Add((float)xPrev);
-            vertices.Add((float)yPrev);
-            vertices.Add((float)xCurr);
-            vertices.Add((float)yCurr);
-            
-            xPrev = xCurr;
-            yPrev = yCurr;
+            if (i > 0)
+            {
+                indices.Add((uint)(vertices.Count / 2 - 2));
+                indices.Add((uint)(vertices.Count / 2 - 1));
+            }
         }
-        return vertices.ToArray();
+        
+        return (vertices.ToArray(), indices.ToArray());
     }
     
     public static float[] PointToVertices(double[] coordinates)
     {
-        return new[] { (float)coordinates[0], (float)coordinates[1] };
+        var (x, y) = MercatorCoordinate.FromLngLat(coordinates[0], coordinates[1]);
+        return new[] { (float)x, (float)y };
     }
 }
