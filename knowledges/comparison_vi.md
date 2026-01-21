@@ -119,3 +119,22 @@ Khi bạn thấy màn hình trắng, GPU thất bại trong im lặng. Hãy dùn
 *   **OpenTK**: Sức mạnh thô, kiểm soát chặt chẽ.
 *   **Toán học**: Là phổ quát, nhưng **Cú pháp API** thì thay đổi.
 *   **Luôn luôn**: Vẽ một tam giác debug trước tiên.
+
+---
+
+## 6. Các chủ đề nâng cao: Giao diện (UI) và Camera 3D
+
+### Tích hợp Giao diện (ImGui)
+Việc thêm Giao diện Người dùng (nút bấm, biểu đồ) vào ngữ cảnh OpenGL thô là rất khó khăn. Chúng tôi đã tích hợp **ImGui.NET** vì nó sử dụng cơ chế render **Immediate Mode** (Chế độ Trực tiếp):
+- **Retained Mode (WPF/WinForms)**: Bạn tạo một đối tượng Nút, và framework sẽ ghi nhớ nó.
+- **Immediate Mode (ImGui)**: Bạn viết `if (Button("Click Me")) { ... }` trong mỗi frame. Giao diện được xây dựng lại và vẽ từ đầu 60 lần mỗi giây.
+- **Lợi ích**: Cực kỳ dễ dàng đồng bộ với trạng thái game. Không cần "event listeners" phức tạp cho các công cụ debug đơn giản.
+
+### Render Bản đồ 3D
+Chuyển từ bản đồ 2D sang 3D đòi hỏi Phép chiếu Phối cảnh (Perspective Projection):
+- **Pitch (Độ nghiêng)**: Xoay quanh trục X. Chúng tôi giới hạn góc này khoảng 85° vì nếu nhìn bản đồ phẳng ở góc 90° (nhìn ngang cạnh), sẽ gây ra hiện tượng Z-fighting và hình học bị biến mất.
+- **Thứ tự Ma trận**: Trong OpenTK (Vector Hàng), thứ tự cực kỳ quan trọng:
+  `World = Scale * Translate`
+  `View = RotateZ(Bearing) * RotateX(Pitch) * Translate(0, 0, -Altitude)`
+  Điều này thực chất là "di chuyển thế giới ra xa" khỏi camera tĩnh.
+
