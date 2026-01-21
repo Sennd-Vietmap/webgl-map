@@ -4,6 +4,7 @@ using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using OpenTK.Mathematics;
 using VectorMap.Core.Tiles;
+using VectorMap.Core.Projection;
 using ImGuiNET;
 
 namespace VectorMap.Desktop;
@@ -125,6 +126,14 @@ public class MapWindow : GameWindow
                 ImGui.Text($"Zoom: {_camera.Zoom:F2}");
                 ImGui.Text($"Pitch: {_camera.Pitch:F0} deg");
                 ImGui.Text($"Bearing: {_camera.Bearing:F0} deg");
+                
+                // Mouse Coordinates
+                var mouse = MousePosition;
+                var (wx, wy) = _camera.ScreenToWorld(mouse.X, mouse.Y, Size.X, Size.Y);
+                var mLat = MercatorCoordinate.LatFromMercatorY(wy);
+                var mLng = MercatorCoordinate.LngFromMercatorX(wx);
+                ImGui.Text($"Mouse: {mLng:F5}, {mLat:F5}");
+                
                 ImGui.Separator();
                 ImGui.PlotLines("##fps", ref _fpsArray[0], i, 0, $"Avg: {_fpsArray.Take(i).Average():F0}", 0, 120, new System.Numerics.Vector2(200, 50));
                 
