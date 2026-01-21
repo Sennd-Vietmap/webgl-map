@@ -137,16 +137,16 @@ public class MapRenderer : IDisposable
             // Compute a high-precision Tile-to-Clip matrix
             // This subtraction is done in DOUBLE to avoid jitter
             double worldSize = 512 * Math.Pow(2, camera.Zoom);
-            double tileScale = 1.0 / Math.Pow(2, tile.Z);
+            double tileScale = 1.0 / Math.Pow(2, tile.Coordinate.Z);
             
             // Relative position of tile origin from camera center
-            double relX = (tile.X - camera.X * Math.Pow(2, tile.Z)) * tileScale;
-            double relY = (tile.Y - camera.Y * Math.Pow(2, tile.Z)) * tileScale;
+            double relX = (tile.Coordinate.X - camera.X * Math.Pow(2, tile.Coordinate.Z)) * tileScale;
+            double relY = (tile.Coordinate.Y - camera.Y * Math.Pow(2, tile.Coordinate.Z)) * tileScale;
             
             // Base matrix for this tile: local (0..1) -> world-relative -> clip
             // We reuse the Camera's View and Projection but replace the World translation
             Matrix4d tileMatrix = Matrix4d.CreateScale(tileScale * worldSize, -tileScale * worldSize, 1.0);
-            tileMatrix *= Matrix4d.CreateTranslation((tile.X * tileScale - camera.X) * worldSize, (camera.Y - tile.Y * tileScale) * worldSize, 0);
+            tileMatrix *= Matrix4d.CreateTranslation((tile.Coordinate.X * tileScale - camera.X) * worldSize, (camera.Y - tile.Coordinate.Y * tileScale) * worldSize, 0);
             tileMatrix *= Matrix4d.CreateRotationZ(MathHelper.DegreesToRadians(camera.Bearing));
             tileMatrix *= Matrix4d.CreateRotationX(MathHelper.DegreesToRadians(-camera.Pitch));
             
