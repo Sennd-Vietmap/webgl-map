@@ -4,6 +4,7 @@ using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using OpenTK.Mathematics;
 using VectorMap.Core.Tiles;
+using ImGuiNET;
 
 namespace VectorMap.Desktop;
 
@@ -19,7 +20,15 @@ public class MapWindow : GameWindow
     
     // Mouse state for panning
     private bool _isDragging;
+    private bool _isRotating;
     private Vector2 _lastMousePos;
+    
+    // ImGui / Diagnostics
+    private ImGuiController _imGuiController = null!;
+    private Queue<float> _fpsHistory = new Queue<float>();
+    private bool _showDiagnostics = true;
+    private const int MaxFpsHistory = 100;
+    private float[] _fpsArray = new float[MaxFpsHistory];
     
     public MapWindow(MapOptions options) 
         : base(
@@ -45,6 +54,9 @@ public class MapWindow : GameWindow
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         GL.Enable(EnableCap.ProgramPointSize);
+        
+        // Initialize ImGui
+        _imGuiController = new ImGuiController(ClientSize.X, ClientSize.Y);
         
         // Initialize camera
         _camera = new Camera(
@@ -92,7 +104,46 @@ public class MapWindow : GameWindow
         var tiles = _tileManager.GetRenderableTiles();
         _renderer.Render(_camera, tiles, _options.DisabledLayers);
         
+        // Render UI
+        _imGuiController.Update(this, (float)e.Time);
+        
+        if (_showDiagnostics)
+        {
+            float fps = (float)(1.0 / e.Time);
+            _fpsHistory.Enqueue(fps);
+            if (_fpsHistory.Count > MaxFpsHistory) _fpsHistory.Dequeue();
+            
+            // Copy to array for plotting
+            int i = 0;
+            foreach(var f in _fpsHistory) _fpsArray[i++] = f;
+            
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(10, 10), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowBgAlpha(0.7f);
+            if (ImGui.Begin("Diagnostics", ref _showDiagnostics, ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text($"FPS: {fps:F0}");
+                ImGui.Text($"Zoom: {_camera.Zoom:F2}");
+                ImGui.Text($"Pitch: {_camera.Pitch:F0} deg");
+                ImGui.Text($"Bearing: {_camera.Bearing:F0} deg");
+                ImGui.Separator();
+                ImGui.PlotLines("##fps", ref _fpsArray[0], i, 0, $"Avg: {_fpsArray.Take(i).Average():F0}", 0, 120, new System.Numerics.Vector2(200, 50));
+                
+                ImGui.End();
+            }
+        }
+        
+        _imGuiController.Render();
+        
         SwapBuffers();
+    }
+
+    protected override void OnResize(ResizeEventArgs e)
+    {
+        base.OnResize(e);
+        GL.Viewport(0, 0, Size.X, Size.Y);
+        _imGuiController.WindowResized(Size.X, Size.Y);
+        _camera.ViewportWidth = Size.X;
+        _camera.ViewportHeight = Size.Y;
     }
     
     protected override void OnUpdateFrame(FrameEventArgs e)
@@ -109,14 +160,7 @@ public class MapWindow : GameWindow
         _tileManager.PruneCache();
     }
     
-    protected override void OnResize(ResizeEventArgs e)
-    {
-        base.OnResize(e);
-        GL.Viewport(0, 0, e.Width, e.Height);
-        _camera.ViewportWidth = e.Width;
-        _camera.ViewportHeight = e.Height;
-        UpdateTiles();
-    }
+
     
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
@@ -125,6 +169,11 @@ public class MapWindow : GameWindow
         if (e.Button == MouseButton.Left)
         {
             _isDragging = true;
+            _lastMousePos = MousePosition;
+        }
+        else if (e.Button == MouseButton.Right)
+        {
+            _isRotating = true;
             _lastMousePos = MousePosition;
         }
     }
@@ -136,6 +185,10 @@ public class MapWindow : GameWindow
         if (e.Button == MouseButton.Left)
         {
             _isDragging = false;
+        }
+        else if (e.Button == MouseButton.Right)
+        {
+            _isRotating = false;
         }
     }
     
@@ -165,6 +218,25 @@ public class MapWindow : GameWindow
                 UpdateTiles();
             }
             
+            _lastMousePos = MousePosition;
+        }
+        else if (_isRotating)
+        {
+            float deltaX = e.X - _lastMousePos.X;
+            float deltaY = e.Y - _lastMousePos.Y;
+            
+            // Bearing (X delta)
+            _camera.Bearing += deltaX * 0.5f;
+            if (_camera.Bearing >= 360) _camera.Bearing -= 360;
+            if (_camera.Bearing < 0) _camera.Bearing += 360;
+            
+            // Pitch (Y delta)
+            _camera.Pitch += deltaY * 0.5f;
+            
+            // Clamp Pitch to 0-60 degrees
+            _camera.Pitch = Math.Max(0, Math.Min(60, _camera.Pitch));
+            
+            UpdateTiles();
             _lastMousePos = MousePosition;
         }
     }
@@ -201,6 +273,7 @@ public class MapWindow : GameWindow
     protected override void OnUnload()
     {
         _renderer.Dispose();
+        _imGuiController.Dispose();
         base.OnUnload();
     }
 }

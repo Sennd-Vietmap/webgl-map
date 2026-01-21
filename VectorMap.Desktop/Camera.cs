@@ -33,42 +33,146 @@ public class Camera
     /// Get the view-projection matrix for rendering
     /// Matches the JavaScript gl-matrix implementation exactly
     /// </summary>
+    public double Pitch { get; set; } = 0; // Degrees (0-60)
+    public double Bearing { get; set; } = 0; // Degrees (0-360)
+
+    /// <summary>
+    /// Get the view-projection matrix for rendering
+    /// Updated for 3D perspective support
+    /// </summary>
     public Matrix4 GetViewProjectionMatrix()
     {
-        double zoomScale = 1.0 / Math.Pow(2, Zoom);
-        double widthScale = TileSize / ViewportWidth;
-        double heightScale = TileSize / ViewportHeight;
+        // 1. World scale (Total pixels at this zoom level)
+        double worldSize = TileSize * Math.Pow(2, Zoom);
         
-        // Camera matrix scale components (same as JS)
-        float scaleX = (float)(zoomScale / widthScale);
-        float scaleY = (float)(zoomScale / heightScale);
+        // 2. Camera Altitude (to match 1:1 pixel scale at rendering plane)
+        // Standard Mapbox FOV is ~36.87 degrees (Math.Atan(0.5) * 2)? Or 60?
+        // Let's use 60 degrees (Pi/3) for dramatic effect, or stick to simple standard.
+        // If we want scale to verify, we align altitude.
+        // Altitude = (ViewportHeight / 2) / tan(FOV / 2)
+        float fovVal = MathHelper.DegreesToRadians(60f);
+        float altitude = (float)(ViewportHeight / 2.0 / Math.Tan(fovVal / 2.0));
         
-        // The camera matrix in gl-matrix (mat3) after translate then scale is:
-        // [scaleX,    0,   0]
-        // [  0,    scaleY, 0]
-        // [X*scaleX, Y*scaleY, 1]  (with column vectors)
-        //
-        // The inverse (view matrix) is:
-        // [1/scaleX,      0,      0]
-        // [   0,      1/scaleY,   0]
-        // [  -X,        -Y,       1]
-        //
-        // But we're using row vectors in OpenTK, and mat4 not mat3
-        // For row vectors: v' = v * M, the matrix layout is transposed
-        
-        float invScaleX = 1f / scaleX;
-        float invScaleY = 1f / scaleY;
-        
-        // Build the view matrix directly for row-vector multiplication
-        // First scale, then translate
-        var viewMat = new Matrix4(
-            invScaleX, 0, 0, 0,
-            0, invScaleY, 0, 0,
-            0, 0, 1, 0,
-            -(float)X * invScaleX, -(float)Y * invScaleY, 0, 1
+        // 3. Projection Matrix (Perspective)
+        // Near plane must be > 0. Far plane large enough.
+        // Aspect ratio = width/height
+        Matrix4 projection = Matrix4.CreatePerspectiveFieldOfView(
+            fovVal, 
+            (float)ViewportWidth / ViewportHeight, 
+            0.1f, // Near
+            altitude * 100f // Far
         );
         
-        return viewMat;
+        // 4. Transform from Lat/Lng (Mercator 0-1) to World Pixels relative to Camera Center
+        // We use double precision for the initial offset to prevent jitter
+        // But matrices are float. So we compute the translation vector in double, 
+        // convert to float, then build the matrix.
+        
+        // NOTE: Vertices are in 0..1 range (Global Mercator)? 
+        // No, TileManager passes tile-relative coordinates?
+        // Wait, checking GeometryConverter... 
+        // VectorTileParser calls GeometryConverter.PolygonToVertices.
+        // GeometryConverter calls MercatorCoordinate.FromLngLat -> returns 0..1 global mercator.
+        // MapRenderer passes these directly.
+        // SO Vertices are 0..1 Global Mercator.
+        
+        // Matrix Chain (Reverse order for Row-Major multiplication):
+        // 1. Translate(-CameraX, -CameraY) -> Centers world on camera
+        // 2. Scale(WorldSize) -> Converts 0..1 to World Pixels
+        // 3. RotateZ(Bearing)
+        // 4. RotateX(Pitch)
+        // 5. Translate(0, 0, -Altitude) -> Move camera back
+        // 6. Projection
+        
+        // Step 1: Translation vector (Model center relative to camera)
+        // Since we are applying this to vertices V:
+        // V_local = (V - CameraPos) * WorldSize
+        // This effectively translates then scales? No.
+        // (V * WorldSize) - (CameraPos * WorldSize)
+        
+        // Let's stick to standard MVP: View * Model
+        // Model Matrix: Just Scale? Vertices are 0..1.
+        // We handle the large number precision by translating BEFORE scaling??
+        
+        // Precision issues: 0..1 coordinates are "doubles" but GPU uses floats.
+        // We rely on "uScale" and "uOffset" in shader for tiling?
+        // The implementation plan used global coords.
+        // MapRenderer handles uScale/uOffset as 1.0/0.0 by default.
+        // We must ensure the matrix doesn't lose precision.
+        
+        // To avoid jitter, the translation (-CameraX, -CameraY) should effectively be handled.
+        
+        // Constructing the full matrix:
+        // V_clip = V_world * [Translate(-CamX, -CamY) * Scale(WorldSize)] * [RotateZ * RotateX * TranslateZ] * Proj
+        
+        // 3a. View Matrix Construction
+        // Camera is at (0, 0, Altitude) looking at (0, 0, 0)
+        // We rotate the WORLD, not the camera.
+        Matrix4 view = Matrix4.Identity;
+        view *= Matrix4.CreateRotationZ(MathHelper.DegreesToRadians((float)Bearing));
+        view *= Matrix4.CreateRotationX(MathHelper.DegreesToRadians((float)Pitch));
+        view *= Matrix4.CreateTranslation(0, 0, -altitude); // Move world back from camera
+        
+        // 3b. Model Transformation (Coordinate -> WorldPixels centered at 0,0)
+        // Standard transform: (V - C) * S
+        // = V*S - C*S
+        
+        // Since we can't create a translation matrix with doubles in OpenTK (it takes floats),
+        // we have to be careful.
+        // Ideally we pass a "CameraCenter" uniform to shader and subtract there?
+        // But for now, let's try constructing the matrix components manually for best precision fitting in floats.
+        
+        // For Scale * Translate:
+        // [ S  0  0  0 ]
+        // [ 0  S  0  0 ]
+        // [ 0  0  S  0 ]
+        // [ -Cx*S -Cy*S 0 1 ]
+        
+        double s = worldSize;
+        double tx = -X * s;
+        double ty = Y * s; // Invert Y for OpenGL?
+        // Wait, Mercator Y is Top-Down (0..1). OpenGL is Bottom-Up.
+        // Existing logic (Camera.cs lines 40-70) had:
+        // double py = (1 - Y) / pixelRatio; -> Inverting Y.
+        
+        // Let's stick to the previous working standard 2D logic but projected.
+        // Previous logic: Mercator(0..1) -> Clip(-1..1).
+        
+        // Recalculating:
+        // Mercator Y (0 top, 1 bottom). OpenGL Y (1 top, -1 bottom).
+        // Correct conversion: Y_gl = (0.5 - Y_merc) * Scale ??
+        
+        // Let's trust the standard Mapbox-style matrix:
+        // Scale = WorldSize
+        // Translate = -CameraX*Scale, -CameraY*Scale
+        
+        // WE MUST FLIP Y somewhere because Mercator Y goes DOWN, OpenGL Y goes UP.
+        // Scale Y by -1 ?
+        
+        Matrix4 model = Matrix4.Identity;
+        model *= Matrix4.CreateScale((float)s, -(float)s, 1f); // Flip Y here?
+        model *= Matrix4.CreateTranslation((float)tx, -(float)ty, 0f); // And negate ty?
+        
+        // Actually, simple way:
+        // Translate world center to 0,0
+        // (V - Cam)
+        
+        // Let's go with the matrix that matches gl-matrix behavior:
+        // 1. Translate (-CamX, -CamY)
+        // 2. Scale (WorldSize)
+        // 3. Rotate ...
+        
+        // But we have to handle the Y-flip.
+        // Mercator: Y increases Down.
+        // OpenGL: Y increases Up.
+        
+        // So:
+        // V.y_gl = -(V.y_merc - Cam.y_merc) * WorldSize
+        
+        Matrix4 worldTransform = Matrix4.CreateTranslation(-(float)X, -(float)Y, 0);
+        worldTransform *= Matrix4.CreateScale((float)worldSize, -(float)worldSize, 1.0f); // Flip Y
+        
+        return worldTransform * view * projection;
     }
     
     /// <summary>
